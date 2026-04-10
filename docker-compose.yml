@@ -1,0 +1,27 @@
+
+services:
+  fake-runtime:
+    build: .
+    container_name: fake-runtime
+    ports:
+      - "50051:50051"
+    environment:
+      - RUNTIME_PORT=50051
+      - RUNTIME_VERSION=v0
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./generated:/app/generated
+      - ./protos:/app/protos
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 50051)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - rak-network
+
+networks:
+  rak-network:
+    driver: bridge

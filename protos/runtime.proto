@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package runtime;
+
+service RuntimeService {
+  rpc Execute(ActionRequest) returns (ActionResponse) {}
+}
+
+message ActionRequest {
+  string version = 1;            // 固定为v0
+  string trace_id = 2;           // 链路唯一标识
+  string source = 3;             // 调用来源
+  string target = 4;             // Runtime实例
+  string state = 5;              // 当前状态摘要
+  repeated string available_actions = 6;  // 允许动作集合
+  string action = 7;             // 请求动作名，可为空
+  string params_json = 8;        // 参数JSON字符串
+}
+
+message ActionResponse {
+  string version = 1;           // 固定为v0
+  string trace_id = 2;          // 原样透传
+  string action = 3;            // 决策动作
+  string params_json = 4;       // 决策后的参数
+  string status = 5;            // ok 或 error
+  string error_code = 6;        // 失败码
+  string error_message = 7;     // 失败说明
+}
