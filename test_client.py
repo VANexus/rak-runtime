@@ -1,3 +1,6 @@
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'generated'))

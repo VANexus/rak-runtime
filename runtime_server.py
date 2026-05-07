@@ -1,84 +1,74 @@
+# runtime_server.py
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), 'generated'))
-
 import grpc
-from concurrent import futures
 import json
-import time
-from generated import runtime_pb2
-from generated import runtime_pb2_grpc
+import logging
+from concurrent import futures
+
+# 添加 generated 目录到系统路径
+sys.path.append(os.path.join(os.path.dirname(__file__), 'generated'))
+try:
+    from generated import runtime_pb2, runtime_pb2_grpc
+    print("[INFO] Successfully imported generated gRPC files.")
+except ImportError as e:
+    print(f"[ERROR] Failed to import generated files: {e}")
+
+# 从 src 目录导入我们的模块
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+from src.core.decision_engine import DecisionEngine
+from src.tools.mqtt_publisher import mqtt_publisher
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
+    def __init__(self):
+        self.engine = DecisionEngine()
+
     def Execute(self, request, context):
-        """
-        处理gRPC Execute请求
-        当前实现最简单的决策逻辑
-        """
-        print(f"[Runtime] 收到请求: trace_id={request.trace_id}")
-        print(f"  state: {request.state}")
-        print(f"  available_actions: {request.available_actions}")
-        print(f"  action: {request.action}")
-        print(f"  params_json: {request.params_json}")
-        
-        # 创建响应对象
+        """gRPC Execute 方法 - 现在它只是一个协调者"""
+        trace_id = request.trace_id
+        logging.info(f"[TraceID: {trace_id}] 收到 gRPC 请求")
+
+        # 1. 调用核心决策引擎
+        decision = self.engine.decide(request)
+
+        # 2. 构建 gRPC 响应
         response = runtime_pb2.ActionResponse()
         response.version = "v0"
-        response.trace_id = request.trace_id
-        
-        # 决策模式1: 动作确认（前端已明确动作）
-        if request.action:
-            if request.action in request.available_actions:
-                response.action = request.action
-                response.params_json = request.params_json
-                response.status = "ok"
-                print(f"  决策: 确认动作 {request.action}")
-            else:
-                response.status = "error"
-                response.error_code = "ACTION_NOT_ALLOWED"
-                response.error_message = f"动作 {request.action} 不在允许列表中"
-                print(f"  错误: 动作不允许")
-        
-        # 决策模式2: 状态转动作（前端只给状态，Runtime决定动作）
+        response.trace_id = trace_id
+        response.status = decision.get("status", "error")
+
+        if response.status == "ok":
+            response.action = decision["action"]
+            response.params_json = decision["params_json"]
+            # 决策成功后，通过 MQTT 下发指令
+            mqtt_publisher.publish_action(
+                target=request.target,
+                action=response.action,
+                params_json=response.params_json
+            )
         else:
-            # 最简单的决策逻辑：选第一个可用动作
-            if request.available_actions:
-                chosen_action = request.available_actions[0]
-                response.action = chosen_action
-                
-                # 为不同动作设置默认参数
-                params = {}
-                if chosen_action == "move_forward":
-                    params = {"distance_cm": 5, "speed": 50}
-                elif chosen_action == "turn_left":
-                    params = {"angle_deg": 90, "speed": 30}
-                
-                response.params_json = json.dumps(params, ensure_ascii=False)
-                response.status = "ok"
-                print(f"  决策: 自动选择动作 {chosen_action}")
-            else:
-                response.status = "error"
-                response.error_code = "DECISION_FAILED"
-                response.error_message = "无可用动作"
-                print(f"  错误: 无可用动作")
-        
+            # 决策失败，填充错误信息
+            response.error_code = decision.get("error_code", "UNKNOWN_ERROR")
+            response.error_message = decision.get("error_message", "决策失败")
+
         return response
 
 def serve():
-    """启动gRPC服务器"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     runtime_pb2_grpc.add_RuntimeServiceServicer_to_server(RuntimeService(), server)
     server.add_insecure_port('[::]:50051')
-    print("Fake Runtime 服务启动，监听端口 50051...")
-    print("按 Ctrl+C 停止服务")
+    logging.info("Fake Runtime 服务启动，监听端口 50051...")
     server.start()
     
     try:
         while True:
-            time.sleep(86400)  # 一天
+            pass # 保持服务运行
     except KeyboardInterrupt:
         server.stop(0)
-        print("服务已停止")
+        logging.info("服务已停止")
 
 if __name__ == '__main__':
     serve()
