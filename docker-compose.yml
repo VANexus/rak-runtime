@@ -1,5 +1,18 @@
+version: "3.8"
 
 services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: rak-mqtt-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mqtt-data:/mosquitto/data
+    restart: unless-stopped
+    networks:
+      - rak-network
+
   fake-runtime:
     build: .
     container_name: fake-runtime
@@ -9,6 +22,10 @@ services:
       - RUNTIME_PORT=50051
       - RUNTIME_VERSION=v0
       - PYTHONUNBUFFERED=1
+      - MQTT_BROKER_HOST=mqtt-broker
+      - MQTT_BROKER_PORT=1883
+    depends_on:
+      - mqtt-broker
     volumes:
       - ./generated:/app/generated
       - ./protos:/app/protos
