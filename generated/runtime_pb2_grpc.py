@@ -2,11 +2,12 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import runtime_pb2 as runtime__pb2
+from . import runtime_pb2 as runtime__pb2
 
 
 class RuntimeServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """原有服务
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -19,13 +20,26 @@ class RuntimeServiceStub(object):
                 request_serializer=runtime__pb2.ActionRequest.SerializeToString,
                 response_deserializer=runtime__pb2.ActionResponse.FromString,
                 )
+        self.StreamASR = channel.stream_stream(
+                '/runtime.RuntimeService/StreamASR',
+                request_serializer=runtime__pb2.ASRRequest.SerializeToString,
+                response_deserializer=runtime__pb2.ASRResponse.FromString,
+                )
 
 
 class RuntimeServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """原有服务
+    """
 
     def Execute(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamASR(self, request_iterator, context):
+        """==================== 【新增】ASR 双向流式接口 ====================
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -38,6 +52,11 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     request_deserializer=runtime__pb2.ActionRequest.FromString,
                     response_serializer=runtime__pb2.ActionResponse.SerializeToString,
             ),
+            'StreamASR': grpc.stream_stream_rpc_method_handler(
+                    servicer.StreamASR,
+                    request_deserializer=runtime__pb2.ASRRequest.FromString,
+                    response_serializer=runtime__pb2.ASRResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'runtime.RuntimeService', rpc_method_handlers)
@@ -46,7 +65,8 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class RuntimeService(object):
-    """Missing associated documentation comment in .proto file."""
+    """原有服务
+    """
 
     @staticmethod
     def Execute(request,
@@ -62,5 +82,22 @@ class RuntimeService(object):
         return grpc.experimental.unary_unary(request, target, '/runtime.RuntimeService/Execute',
             runtime__pb2.ActionRequest.SerializeToString,
             runtime__pb2.ActionResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def StreamASR(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/runtime.RuntimeService/StreamASR',
+            runtime__pb2.ASRRequest.SerializeToString,
+            runtime__pb2.ASRResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

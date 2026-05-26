@@ -1,40 +1,43 @@
-# runtime_server.py
 import sys
 import os
 import grpc
-import json
 import logging
 from concurrent import futures
+import time
 
-# 添加 generated 目录到系统路径
+# 添加路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'generated'))
-try:
-    from generated import runtime_pb2, runtime_pb2_grpc
-    print("[INFO] Successfully imported generated gRPC files.")
-except ImportError as e:
-    print(f"[ERROR] Failed to import generated files: {e}")
-
-# 从 src 目录导入我们的模块
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
-from src.core.decision_engine import DecisionEngine
-from src.tools.mqtt_publisher import mqtt_publisher
 
-# 配置日志
+# gRPC 导入
+import generated.runtime_pb2 as runtime_pb2
+import generated.runtime_pb2_grpc as runtime_pb2_grpc
+
+# 业务模块
+from src.core.decision_engine import DecisionEngine
+from src.tools.mqtt_publisher import MQTTPublisher
+from src.tools import ASRTool
+
+# 日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+# ✅ 关键：继承正确的基类
 class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
     def __init__(self):
-        self.engine = DecisionEngine()
+        self.decision_engine = DecisionEngine()
+        self.mqtt_publisher = MQTTPublisher()
+
+        # 加载ASR模型
+        print("[INFO] 正在加载Whisper模型...")
+        self.asr_tool = ASRTool()
+        print("[INFO] Whisper模型加载完成！")
 
     def Execute(self, request, context):
-        """gRPC Execute 方法 - 现在它只是一个协调者"""
         trace_id = request.trace_id
         logging.info(f"[TraceID: {trace_id}] 收到 gRPC 请求")
 
-        # 1. 调用核心决策引擎
-        decision = self.engine.decide(request)
+        decision = self.decision_engine.decide(request)
 
-        # 2. 构建 gRPC 响应
         response = runtime_pb2.ActionResponse()
         response.version = "v0"
         response.trace_id = trace_id
@@ -43,32 +46,66 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
         if response.status == "ok":
             response.action = decision["action"]
             response.params_json = decision["params_json"]
-            # 决策成功后，通过 MQTT 下发指令
-            mqtt_publisher.publish_action(
+            self.mqtt_publisher.publish_action(
                 target=request.target,
                 action=response.action,
                 params_json=response.params_json
             )
         else:
-            # 决策失败，填充错误信息
             response.error_code = decision.get("error_code", "UNKNOWN_ERROR")
             response.error_message = decision.get("error_message", "决策失败")
 
         return response
 
+    # ✅ 关键：方法名必须和proto完全一致，且缩进在类里面
+    def StreamASR(self, request_iterator, context):
+        trace_id = ""
+        last_time = time.time()
+        audio_buffer = []
+
+        try:
+            for req in request_iterator:
+                if req.HasField("config"):
+                    trace_id = req.config.trace_id
+                    continue
+
+                if req.HasField("audio_chunk"):
+                    audio_buffer.append(req.audio_chunk)
+                    if len(audio_buffer) > 3:
+                        full_audio = b"".join(audio_buffer)
+                        self.asr_tool.add_audio(full_audio)
+                        audio_buffer = []
+
+                    if time.time() - last_time >= 0.3:
+                        text, conf = self.asr_tool.transcribe()
+                        last_time = time.time()
+                        if text:
+                            yield runtime_pb2.ASRResponse(
+                                text=text,
+                                trace_id=trace_id,
+                                is_final=True,
+                                confidence=conf,
+                                status="ok"
+                            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield runtime_pb2.ASRResponse(
+                status="error",
+                error_message=str(e)
+            )
+
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     runtime_pb2_grpc.add_RuntimeServiceServicer_to_server(RuntimeService(), server)
     server.add_insecure_port('[::]:50051')
-    logging.info("Fake Runtime 服务启动，监听端口 50051...")
+    logging.info("rak runtime 服务启动，监听端口 50051...")
     server.start()
-    
     try:
         while True:
-            pass # 保持服务运行
+            pass
     except KeyboardInterrupt:
         server.stop(0)
-        logging.info("服务已停止")
 
 if __name__ == '__main__':
     serve()

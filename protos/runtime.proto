@@ -2,10 +2,15 @@ syntax = "proto3";
 
 package runtime;
 
+// 原有服务
 service RuntimeService {
   rpc Execute(ActionRequest) returns (ActionResponse) {}
+
+  // ==================== 【新增】ASR 双向流式接口 ====================
+  rpc StreamASR(stream ASRRequest) returns (stream ASRResponse);
 }
 
+// 原有消息
 message ActionRequest {
   string version = 1;            // 固定为v0
   string trace_id = 2;           // 链路唯一标识
@@ -25,4 +30,33 @@ message ActionResponse {
   string status = 5;            // ok 或 error
   string error_code = 6;        // 失败码
   string error_message = 7;     // 失败说明
+}
+
+// ====================【新增】ASR 相关消息 ====================
+
+// ASR 流式请求：首包发配置，后续包发音频流
+message ASRRequest {
+  oneof request_type {
+    ASRConfig config = 1;       // 第一个消息必须是配置
+    bytes audio_chunk = 2;       // 后续：16kHz 16bit 单声道 PCM 音频块
+  }
+}
+
+// ASR 配置信息
+message ASRConfig {
+  string version = 1;            // 固定为"v0"
+  string trace_id = 2;           // 链路追踪ID
+  string language = 3;           // 识别语言，默认"zh"
+  int32 sample_rate = 4;         // 采样率，固定16000
+  int32 channels = 5;            // 声道数，固定1
+}
+
+// ASR 流式响应：实时返回转写结果
+message ASRResponse {
+  string text = 1;               // 转写文本
+  string trace_id = 2;           // 原样透传
+  bool is_final = 3;             // 是否最终结果（当前恒为true）
+  float confidence = 4;          // 置信度 0.0–1.0
+  string status = 5;             // ok / error
+  string error_message = 6;      // 错误详情
 }

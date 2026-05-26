@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rruntime.proto\x12\x07runtime\"\xa1\x01\n\rActionRequest\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x0e\n\x06source\x18\x03 \x01(\t\x12\x0e\n\x06target\x18\x04 \x01(\t\x12\r\n\x05state\x18\x05 \x01(\t\x12\x19\n\x11\x61vailable_actions\x18\x06 \x03(\t\x12\x0e\n\x06\x61\x63tion\x18\x07 \x01(\t\x12\x13\n\x0bparams_json\x18\x08 \x01(\t\"\x93\x01\n\x0e\x41\x63tionResponse\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\t\x12\x13\n\x0bparams_json\x18\x04 \x01(\t\x12\x0e\n\x06status\x18\x05 \x01(\t\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x15\n\rerror_message\x18\x07 \x01(\t2N\n\x0eRuntimeService\x12<\n\x07\x45xecute\x12\x16.runtime.ActionRequest\x1a\x17.runtime.ActionResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rruntime.proto\x12\x07runtime\"\xa1\x01\n\rActionRequest\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x0e\n\x06source\x18\x03 \x01(\t\x12\x0e\n\x06target\x18\x04 \x01(\t\x12\r\n\x05state\x18\x05 \x01(\t\x12\x19\n\x11\x61vailable_actions\x18\x06 \x03(\t\x12\x0e\n\x06\x61\x63tion\x18\x07 \x01(\t\x12\x13\n\x0bparams_json\x18\x08 \x01(\t\"\x93\x01\n\x0e\x41\x63tionResponse\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\t\x12\x13\n\x0bparams_json\x18\x04 \x01(\t\x12\x0e\n\x06status\x18\x05 \x01(\t\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x15\n\rerror_message\x18\x07 \x01(\t\"Y\n\nASRRequest\x12$\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x12.runtime.ASRConfigH\x00\x12\x15\n\x0b\x61udio_chunk\x18\x02 \x01(\x0cH\x00\x42\x0e\n\x0crequest_type\"g\n\tASRConfig\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\x12\x13\n\x0bsample_rate\x18\x04 \x01(\x05\x12\x10\n\x08\x63hannels\x18\x05 \x01(\x05\"z\n\x0b\x41SRResponse\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08trace_id\x18\x02 \x01(\t\x12\x10\n\x08is_final\x18\x03 \x01(\x08\x12\x12\n\nconfidence\x18\x04 \x01(\x02\x12\x0e\n\x06status\x18\x05 \x01(\t\x12\x15\n\rerror_message\x18\x06 \x01(\t2\x8a\x01\n\x0eRuntimeService\x12<\n\x07\x45xecute\x12\x16.runtime.ActionRequest\x1a\x17.runtime.ActionResponse\"\x00\x12:\n\tStreamASR\x12\x13.runtime.ASRRequest\x1a\x14.runtime.ASRResponse(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -25,6 +25,12 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_ACTIONREQUEST']._serialized_end=188
   _globals['_ACTIONRESPONSE']._serialized_start=191
   _globals['_ACTIONRESPONSE']._serialized_end=338
-  _globals['_RUNTIMESERVICE']._serialized_start=340
-  _globals['_RUNTIMESERVICE']._serialized_end=418
+  _globals['_ASRREQUEST']._serialized_start=340
+  _globals['_ASRREQUEST']._serialized_end=429
+  _globals['_ASRCONFIG']._serialized_start=431
+  _globals['_ASRCONFIG']._serialized_end=534
+  _globals['_ASRRESPONSE']._serialized_start=536
+  _globals['_ASRRESPONSE']._serialized_end=658
+  _globals['_RUNTIMESERVICE']._serialized_start=661
+  _globals['_RUNTIMESERVICE']._serialized_end=799
 # @@protoc_insertion_point(module_scope)
