@@ -84,7 +84,7 @@ rak-runtime/
 ### 环境准备
 1. 克隆仓库
 ```bash
-git clone https://github.com/YYHYCR/rak-runtime.git
+git clone https://github.com/VANexus/rak-runtime.git
 cd rak-runtime
 ```
 
