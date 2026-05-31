@@ -1,6 +1,12 @@
 import asyncio
 import paho.mqtt.client as mqtt
-from src.personaplex_client import PersonaPlexASRClient
+from src.tools.personaplex_client import PersonaPlexASRClient
+
+"""
+PersonaPlex 端到端实时语音转写客户端
+基于NVIDIA PersonaPlex的WebSocket接口，实现低延迟的语音转写
+转写结果自动发布到MQTT主题 `rak/command/text`，供ESP32设备接收
+"""
 
 # -------------------------- config --------------------------
 # MQTT服务器地址
