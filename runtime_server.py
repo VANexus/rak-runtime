@@ -15,7 +15,6 @@ import generated.runtime_pb2_grpc as runtime_pb2_grpc
 
 # 业务模块
 from src.core.decision_engine import DecisionEngine
-from src.tools.mqtt_publisher import MQTTPublisher
 from src.tools import ASRTool
 
 # 日志
@@ -25,7 +24,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
     def __init__(self):
         self.decision_engine = DecisionEngine()
-        self.mqtt_publisher = MQTTPublisher()
 
         # 加载ASR模型
         print("[INFO] 正在加载Whisper模型...")
@@ -46,11 +44,6 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
         if response.status == "ok":
             response.action = decision["action"]
             response.params_json = decision["params_json"]
-            self.mqtt_publisher.publish_action(
-                target=request.target,
-                action=response.action,
-                params_json=response.params_json
-            )
         else:
             response.error_code = decision.get("error_code", "UNKNOWN_ERROR")
             response.error_message = decision.get("error_message", "决策失败")
@@ -73,7 +66,7 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
                     audio_buffer.append(req.audio_chunk)
                     if len(audio_buffer) > 3:
                         full_audio = b"".join(audio_buffer)
-                        self.asr_tool.add_audio(full_audio)
+                        self.asr_tool.add_audio_chunk(full_audio)
                         audio_buffer = []
 
                     if time.time() - last_time >= 0.3:
