@@ -10,7 +10,7 @@ service RuntimeService {
   rpc StreamASR(stream ASRRequest) returns (stream ASRResponse);
 }
 
-// 原有消息
+// 原有消息（扩展：支持音频输入 + 多动作输出）
 message ActionRequest {
   string version = 1;            // 固定为v0
   string trace_id = 2;           // 链路唯一标识
@@ -18,18 +18,34 @@ message ActionRequest {
   string target = 4;             // Runtime实例
   string state = 5;              // 当前状态摘要
   repeated string available_actions = 6;  // 允许动作集合
-  string action = 7;             // 请求动作名，可为空
+  string action = 7;             // 请求动作名，可为空（有audio时自动ASR）
   string params_json = 8;        // 参数JSON字符串
+  bytes audio = 9;               // 【新增】完整PCM音频数据（16kHz/16bit/单声道），有此字段时先ASR再决策
 }
 
 message ActionResponse {
   string version = 1;           // 固定为v0
   string trace_id = 2;          // 原样透传
-  string action = 3;            // 决策动作
-  string params_json = 4;       // 决策后的参数
+  string action = 3;            // 决策动作（单动作兼容）
+  string params_json = 4;       // 决策后的参数（单动作兼容）
   string status = 5;            // ok 或 error
   string error_code = 6;        // 失败码
   string error_message = 7;     // 失败说明
+  string asr_text = 8;          // ASR识别文本（有audio时返回）
+  repeated ActionItem actions = 9;  // 多原子动作列表（LLM分解后返回）
+  string voice_reply = 10;      // 【新增】PersonaPlex语音回复文本（超低延迟路径）
+  bytes voice_audio = 11;       // 【新增】PersonaPlex语音回复音频（如支持TTS）
+  float latency_personaplex_ms = 12; // PersonaPlex管线延迟
+  float latency_asr_ms = 13;    // ASR管线延迟
+  float latency_llm_ms = 14;    // LLM管线延迟
+}
+
+// 【新增】原子动作项
+message ActionItem {
+  string action = 1;             // 动作名（如 lock_open, shake_head）
+  string params_json = 2;        // 动作参数JSON
+  string target_device = 3;      // 目标设备ID（可选，空则由kernel路由）
+  int32 priority = 4;            // 优先级 Q0=0, Q1=1, Q2=2
 }
 
 // ====================【新增】ASR 相关消息 ====================

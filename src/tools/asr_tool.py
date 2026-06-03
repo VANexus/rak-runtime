@@ -59,8 +59,9 @@ class ASRTool:
         
         # 提取结果
         text = result["text"].strip()
-        confidence = result.get("segments", [{}])[0].get("confidence", 0.0)
-        
+        segments = result.get("segments", [])
+        confidence = segments[0].get("confidence", 0.0) if segments else 0.0
+
         return text, confidence
 
     def reset(self) -> None:

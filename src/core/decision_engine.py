@@ -2,12 +2,16 @@
 import json
 import logging
 import os
-from typing import List, Dict
+import struct
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 # LLM 客户端（延迟初始化）
 _llm_client = None
+
+# ASR 实例（延迟初始化）
+_asr_tool = None
 
 
 def _get_llm_client():
@@ -22,7 +26,7 @@ def _get_llm_client():
                     "ANTHROPIC_BASE_URL",
                     "https://token-plan-cn.xiaomimimo.com/anthropic",
                 ),
-                timeout=5.0,  # 5 秒超时
+                timeout=15.0,  # 15 秒超时（代理链路较长）
             )
             logger.info("Anthropic LLM 客户端初始化成功")
         except Exception as e:
@@ -31,8 +35,26 @@ def _get_llm_client():
     return _llm_client if _llm_client is not False else None
 
 
+def _get_asr_tool():
+    """延迟初始化 ASR 工具"""
+    global _asr_tool
+    if _asr_tool is None:
+        try:
+            from src.tools import ASRTool
+            if ASRTool is not None:
+                _asr_tool = ASRTool()
+                logger.info("ASR Whisper 模型初始化成功")
+            else:
+                _asr_tool = False
+                logger.warning("ASR 不可用（whisper 未安装）")
+        except Exception as e:
+            _asr_tool = False
+            logger.warning(f"ASR 初始化失败: {e}")
+    return _asr_tool if _asr_tool is not False else None
+
+
 def _build_system_prompt(available_actions: List[str]) -> str:
-    """构建 LLM 系统提示"""
+    """构建 LLM 系统提示（单动作兼容）"""
     actions_desc = "\n".join(f"- {a}" for a in available_actions)
     return f"""你是一个嵌入式设备决策引擎。你的任务是从可用动作列表中选择最合适的动作并生成参数。
 
@@ -52,8 +74,36 @@ def _build_system_prompt(available_actions: List[str]) -> str:
 - "reasoning": 简短的决策理由（中文）"""
 
 
+def _build_decompose_prompt(available_actions: List[str]) -> str:
+    """构建 LLM 多动作分解提示"""
+    actions_desc = "\n".join(f"- {a}" for a in available_actions)
+    return f"""你是一个嵌入式设备任务分解引擎。你的任务是将用户的自然语言指令分解为一系列原子动作。
+
+## 可用原子动作
+{actions_desc}
+
+## 规则
+1. 只能使用上述列表中的动作
+2. 每个动作必须是独立可执行的原子操作
+3. 按执行顺序排列
+4. 每个动作都需要合理的参数
+5. 如果指令模糊，选择最安全的解读
+
+## 输出格式
+返回一个 JSON 对象：
+{{
+  "actions": [
+    {{"action": "动作名", "params_json": "{{}}", "priority": 0}},
+    ...
+  ],
+  "reasoning": "简短的分解理由（中文）"
+}}
+
+priority: 0=实时(Q0), 1=交互(Q1), 2=管理(Q2)"""
+
+
 def _llm_decide(state: str, available_actions: List[str], action: str = "", params_json: str = "") -> dict:
-    """调用 LLM 进行决策（带超时）"""
+    """调用 LLM 进行单动作决策（带超时）"""
     import threading
 
     client = _get_llm_client()
@@ -110,10 +160,10 @@ def _llm_decide(state: str, available_actions: List[str], action: str = "", para
         except Exception as e:
             exception[0] = e
 
-    # 在单独线程中调用 LLM，5 秒超时
+    # 在单独线程中调用 LLM，15 秒超时
     thread = threading.Thread(target=_call_llm, daemon=True)
     thread.start()
-    thread.join(timeout=5.0)
+    thread.join(timeout=15.0)
 
     if thread.is_alive():
         logger.warning("LLM 调用超时（5秒），回退到规则引擎")
@@ -126,6 +176,100 @@ def _llm_decide(state: str, available_actions: List[str], action: str = "", para
     return result[0]
 
 
+def _llm_decompose(text: str, available_actions: List[str]) -> Optional[List[dict]]:
+    """调用 LLM 将自然语言分解为多个原子动作（带超时）"""
+    import threading
+
+    client = _get_llm_client()
+    if client is None:
+        return None
+
+    model = os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
+
+    result = [None]
+    exception = [None]
+
+    def _call_llm():
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=512,
+                system=_build_decompose_prompt(available_actions),
+                messages=[{"role": "user", "content": f"用户指令: {text}"}],
+            )
+
+            raw = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    raw = block.text.strip()
+                    break
+            if not raw:
+                return
+
+            # 提取 JSON
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+
+            parsed = json.loads(raw)
+            actions = parsed.get("actions", [])
+
+            # 验证所有动作都在可用列表中
+            valid_actions = []
+            for a in actions:
+                action_name = a.get("action", "")
+                if action_name in available_actions:
+                    valid_actions.append({
+                        "action": action_name,
+                        "params_json": a.get("params_json", "{}"),
+                        "priority": a.get("priority", 2),
+                    })
+                else:
+                    logger.warning(f"LLM 分解了不可用的动作 '{action_name}'，跳过")
+
+            if valid_actions:
+                result[0] = valid_actions
+        except Exception as e:
+            exception[0] = e
+
+    thread = threading.Thread(target=_call_llm, daemon=True)
+    thread.start()
+    thread.join(timeout=20.0)  # 分解任务给更多时间
+
+    if thread.is_alive():
+        logger.warning("LLM 分解超时（8秒）")
+        return None
+
+    if exception[0]:
+        logger.error(f"LLM 分解失败: {exception[0]}")
+        return None
+
+    return result[0]
+
+
+def _transcribe_audio(audio_bytes: bytes) -> Optional[str]:
+    """将 PCM 音频转为文本"""
+    asr = _get_asr_tool()
+    if asr is None:
+        logger.warning("ASR 不可用，无法转写音频")
+        return None
+
+    try:
+        # ASRTool 期望 raw PCM bytes
+        asr.add_audio_chunk(audio_bytes)
+        text, confidence = asr.transcribe()
+        if text:
+            logger.info(f"ASR 转写结果: '{text}' (置信度: {confidence:.2f})")
+            return text
+        else:
+            logger.warning("ASR 转写结果为空")
+            return None
+    except Exception as e:
+        logger.error(f"ASR 转写失败: {e}")
+        return None
+
+
 class DecisionEngine:
     def __init__(self):
         # 预初始化 LLM 客户端
@@ -133,7 +277,7 @@ class DecisionEngine:
 
     def decide(self, request) -> dict:
         """
-        核心决策逻辑。
+        核心决策逻辑（单动作，向后兼容）。
         优先使用 LLM，失败时回退到规则引擎。
         """
         trace_id = request.trace_id
@@ -169,6 +313,99 @@ class DecisionEngine:
 
         logger.info(f"[TraceID: {trace_id}] 规则引擎决策完成: {decision.get('action')}")
         return decision
+
+    def decide_from_audio(self, audio_bytes: bytes, available_actions: List[str], trace_id: str = "") -> dict:
+        """
+        音频→ASR→LLM分解→多原子动作（全链路核心方法）。
+        1. ASR 转写音频为文本
+        2. LLM 将文本分解为多个原子动作
+        3. 返回动作列表（边缘可直接执行，无需再等LLM）
+        """
+        logger.info(f"[TraceID: {trace_id}] 音频决策引擎启动，音频大小: {len(audio_bytes)} bytes")
+
+        # 步骤 1: ASR 转写
+        text = _transcribe_audio(audio_bytes)
+        if not text:
+            return {
+                "status": "error",
+                "error_code": "ASR_FAILED",
+                "error_message": "语音识别失败或结果为空",
+                "asr_text": "",
+                "actions": [],
+            }
+
+        logger.info(f"[TraceID: {trace_id}] ASR 转写完成: '{text}'")
+
+        # 步骤 2: LLM 分解为多原子动作
+        actions = _llm_decompose(text, available_actions)
+
+        if actions is not None:
+            logger.info(f"[TraceID: {trace_id}] LLM 分解完成: {len(actions)} 个原子动作")
+            return {
+                "status": "ok",
+                "asr_text": text,
+                "actions": actions,
+            }
+
+        # 步骤 3: LLM 不可用，用规则引擎做简单映射
+        logger.info(f"[TraceID: {trace_id}] LLM 不可用，使用规则引擎做简单映射")
+        rule_actions = self._rule_decompose(text, available_actions)
+
+        return {
+            "status": "ok",
+            "asr_text": text,
+            "actions": rule_actions,
+        }
+
+    def _rule_decompose(self, text: str, available_actions: List[str]) -> List[dict]:
+        """规则引擎：基于关键词的简单动作映射"""
+        # 关键词→动作映射（中文+英文）
+        keyword_map = {
+            # 中文
+            "开门": "lock_open", "开锁": "lock_open", "打开门": "lock_open",
+            "关门": "lock_close", "锁门": "lock_close", "关上门": "lock_close",
+            "前进": "move_forward", "往前走": "move_forward", "向前": "move_forward",
+            "后退": "move_back", "往后走": "move_back", "向后": "move_back",
+            "左转": "turn_left", "向左转": "turn_left",
+            "右转": "turn_right", "向右转": "turn_right",
+            "挥手": "wave_hand", "招手": "wave_hand",
+            "摇头": "shake_head", "点头": "nod",
+            "跳舞": "dance",
+            "停止": "emergency_stop", "停": "emergency_stop",
+            # 英文
+            "open": "lock_open", "unlock": "lock_open",
+            "close": "lock_close", "lock": "lock_close",
+            "forward": "move_forward", "back": "move_back",
+            "left": "turn_left", "right": "turn_right",
+            "wave": "wave_hand", "nod": "nod", "shake": "shake_head",
+            "dance": "dance", "stop": "emergency_stop",
+        }
+
+        # 按关键词长度降序排序（长的优先匹配）
+        sorted_keywords = sorted(keyword_map.keys(), key=len, reverse=True)
+
+        actions = []
+        remaining = text
+        for keyword in sorted_keywords:
+            if keyword in remaining:
+                action_name = keyword_map[keyword]
+                if action_name in available_actions:
+                    actions.append({
+                        "action": action_name,
+                        "params_json": "{}",
+                        "priority": 1,  # Q1 交互
+                    })
+                    remaining = remaining.replace(keyword, "", 1)
+
+        # 如果没匹配到任何动作，返回默认动作
+        if not actions and available_actions:
+            actions.append({
+                "action": available_actions[0],
+                "params_json": "{}",
+                "priority": 2,
+            })
+
+        return actions
 
     def _validate_request(self, request) -> dict:
         """请求校验逻辑"""

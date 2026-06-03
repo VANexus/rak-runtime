@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from . import runtime_pb2 as runtime__pb2
+import runtime_pb2 as runtime__pb2
 
 
 class RuntimeServiceStub(object):
