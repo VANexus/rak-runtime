@@ -22,6 +22,7 @@ def _get_llm_client():
                     "ANTHROPIC_BASE_URL",
                     "https://token-plan-cn.xiaomimimo.com/anthropic",
                 ),
+                timeout=5.0,  # 5 秒超时
             )
             logger.info("Anthropic LLM 客户端初始化成功")
         except Exception as e:
@@ -52,53 +53,77 @@ def _build_system_prompt(available_actions: List[str]) -> str:
 
 
 def _llm_decide(state: str, available_actions: List[str], action: str = "", params_json: str = "") -> dict:
-    """调用 LLM 进行决策"""
+    """调用 LLM 进行决策（带超时）"""
+    import threading
+
     client = _get_llm_client()
     if client is None:
         return None  # LLM 不可用，回退到规则引擎
 
     model = os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
 
-    try:
-        if action:
-            # 动作确认模式：LLM 验证/调整参数
-            user_msg = f"用户请求执行动作: {action}\n当前参数: {params_json or '{}'}\n请验证并返回最终的动作和参数。"
-        else:
-            # 状态决策模式
-            user_msg = f"当前状态: {state or '未知'}\n请从可用动作中选择最合适的一个并生成参数。"
+    result = [None]
+    exception = [None]
 
-        response = client.messages.create(
-            model=model,
-            max_tokens=512,
-            system=_build_system_prompt(available_actions),
-            messages=[{"role": "user", "content": user_msg}],
-        )
+    def _call_llm():
+        try:
+            if action:
+                user_msg = f"执行动作: {action}, 参数: {params_json or '{}'}"
+            else:
+                user_msg = f"状态: {state or '未知'}, 可用动作: {', '.join(available_actions)}"
 
-        # 解析 LLM 响应
-        text = response.content[0].text.strip()
-        # 尝试提取 JSON
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+            response = client.messages.create(
+                model=model,
+                max_tokens=256,
+                system=_build_system_prompt(available_actions),
+                messages=[{"role": "user", "content": user_msg}],
+            )
 
-        result = json.loads(text)
+            # 解析 LLM 响应（兼容 ThinkingBlock 和 TextBlock）
+            text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text = block.text.strip()
+                    break
+            if not text:
+                return
 
-        # 验证动作在可用列表中
-        chosen_action = result.get("action", "")
-        if chosen_action not in available_actions:
-            logger.warning(f"LLM 选择了不可用的动作 '{chosen_action}'，回退到第一个可用动作")
-            chosen_action = available_actions[0]
+            # 尝试提取 JSON
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
 
-        return {
-            "status": "ok",
-            "action": chosen_action,
-            "params_json": result.get("params_json", "{}"),
-        }
+            parsed = json.loads(text)
 
-    except Exception as e:
-        logger.error(f"LLM 决策失败: {e}")
-        return None  # 回退到规则引擎
+            # 验证动作在可用列表中
+            chosen_action = parsed.get("action", "")
+            if chosen_action not in available_actions:
+                logger.warning(f"LLM 选择了不可用的动作 '{chosen_action}'，回退到第一个可用动作")
+                chosen_action = available_actions[0]
+
+            result[0] = {
+                "status": "ok",
+                "action": chosen_action,
+                "params_json": parsed.get("params_json", "{}"),
+            }
+        except Exception as e:
+            exception[0] = e
+
+    # 在单独线程中调用 LLM，5 秒超时
+    thread = threading.Thread(target=_call_llm, daemon=True)
+    thread.start()
+    thread.join(timeout=5.0)
+
+    if thread.is_alive():
+        logger.warning("LLM 调用超时（5秒），回退到规则引擎")
+        return None
+
+    if exception[0]:
+        logger.error(f"LLM 决策失败: {exception[0]}")
+        return None
+
+    return result[0]
 
 
 class DecisionEngine:

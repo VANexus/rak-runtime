@@ -25,10 +25,14 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
     def __init__(self):
         self.decision_engine = DecisionEngine()
 
-        # 加载ASR模型
-        print("[INFO] 正在加载Whisper模型...")
-        self.asr_tool = ASRTool()
-        print("[INFO] Whisper模型加载完成！")
+        # 加载ASR模型（可选）
+        if ASRTool is not None:
+            print("[INFO] 正在加载Whisper模型...")
+            self.asr_tool = ASRTool()
+            print("[INFO] Whisper模型加载完成！")
+        else:
+            self.asr_tool = None
+            print("[WARN] ASR 不可用（whisper 未安装），语音功能已禁用")
 
     def Execute(self, request, context):
         trace_id = request.trace_id
@@ -52,6 +56,13 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
 
     # ✅ 关键：方法名必须和proto完全一致，且缩进在类里面
     def StreamASR(self, request_iterator, context):
+        if self.asr_tool is None:
+            yield runtime_pb2.ASRResponse(
+                status="error",
+                error_message="ASR 不可用（whisper 未安装）"
+            )
+            return
+
         trace_id = ""
         last_time = time.time()
         audio_buffer = []
