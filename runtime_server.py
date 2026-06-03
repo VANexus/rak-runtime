@@ -95,8 +95,7 @@ def serve():
     logging.info("rak runtime 服务启动，监听端口 50051...")
     server.start()
     try:
-        while True:
-            pass
+        server.wait_for_termination()
     except KeyboardInterrupt:
         server.stop(0)
 

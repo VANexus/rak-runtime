@@ -105,7 +105,6 @@ class DecisionEngine:
     def __init__(self):
         # 预初始化 LLM 客户端
         _get_llm_client()
-        pass
 
     def decide(self, request) -> dict:
         """
