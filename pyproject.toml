@@ -1,6 +1,7 @@
 [project]
 name = "rak-runtime"
 version = "0.2.0"
+requires-python = ">=3.11"
 dependencies = [
     "openai-whisper==20240930",
     "paho-mqtt==1.6.1",
@@ -18,3 +19,6 @@ dependencies = [
     # PersonaPlex 客户端
     "websockets==12.0"
 ]
+
+[tool.uv.extra-build-dependencies]
+openai-whisper = ["setuptools"]
