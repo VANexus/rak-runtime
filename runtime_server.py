@@ -37,6 +37,9 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
             self.asr_tool = None
             print("[WARN] ASR 不可用（whisper 未安装），语音功能已禁用")
 
+        # 记忆系统状态
+        print(f"[INFO] 记忆系统: {self.decision_engine.get_memory_stats()}")
+
     def _get_audio_pipeline(self):
         """延迟初始化双管线处理器"""
         if self.audio_pipeline is None:
@@ -197,15 +200,35 @@ class RuntimeService(runtime_pb2_grpc.RuntimeServiceServicer):
 
 
 def serve():
+    service = RuntimeService()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    runtime_pb2_grpc.add_RuntimeServiceServicer_to_server(RuntimeService(), server)
+    runtime_pb2_grpc.add_RuntimeServiceServicer_to_server(service, server)
     server.add_insecure_port('[::]:50051')
     logging.info("rak runtime 服务启动，监听端口 50051...")
+    logging.info(f"[INIT] 记忆系统统计: {service.decision_engine.get_memory_stats()}")
     server.start()
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:
+        # 关闭前整合记忆
+        try:
+            memory = _get_memory_engine()
+            if memory:
+                memory.consolidate()
+                logging.info("[SHUTDOWN] 记忆整合完成")
+        except Exception:
+            pass
         server.stop(0)
+
+
+def _get_memory_engine():
+    """获取记忆引擎实例"""
+    try:
+        from src.core.memory_engine import CognitiveMemoryEngine
+        from src.core.decision_engine import _get_memory_engine as _get_mem
+        return _get_mem()
+    except Exception:
+        return None
 
 
 if __name__ == '__main__':

@@ -7,6 +7,23 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# 记忆引擎（延迟初始化）
+_memory_engine = None
+
+
+def _get_memory_engine():
+    """延迟初始化认知记忆引擎"""
+    global _memory_engine
+    if _memory_engine is None:
+        try:
+            from src.core.memory_engine import CognitiveMemoryEngine
+            _memory_engine = CognitiveMemoryEngine()
+            logger.info("认知记忆引擎初始化成功")
+        except Exception as e:
+            logger.warning(f"记忆引擎初始化失败: {e}")
+            _memory_engine = False
+    return _memory_engine if _memory_engine is not False else None
+
 # LLM 客户端（延迟初始化）
 _llm_client = None
 
@@ -274,11 +291,14 @@ class DecisionEngine:
     def __init__(self):
         # 预初始化 LLM 客户端
         _get_llm_client()
+        # 预初始化记忆引擎
+        _get_memory_engine()
 
     def decide(self, request) -> dict:
         """
         核心决策逻辑（单动作，向后兼容）。
         优先使用 LLM，失败时回退到规则引擎。
+        集成记忆系统：检索相关记忆作为上下文。
         """
         trace_id = request.trace_id
         logger.info(f"[TraceID: {trace_id}] 决策引擎启动...")
@@ -292,7 +312,12 @@ class DecisionEngine:
                 "error_message": validation_result["message"],
             }
 
-        # 步骤 2: 尝试 LLM 决策
+        # 步骤 1.5: 检索相关记忆
+        memory_context = self._retrieve_memory_context(
+            request.state or request.action or ""
+        )
+
+        # 步骤 2: 尝试 LLM 决策（带记忆上下文）
         llm_result = _llm_decide(
             state=request.state,
             available_actions=list(request.available_actions),
@@ -302,6 +327,8 @@ class DecisionEngine:
 
         if llm_result is not None:
             logger.info(f"[TraceID: {trace_id}] LLM 决策完成: {llm_result.get('action')}")
+            # 记录到记忆
+            self._store_decision_memory(trace_id, request, llm_result, memory_context)
             return llm_result
 
         # 步骤 3: 回退到规则引擎
@@ -312,14 +339,20 @@ class DecisionEngine:
             decision = self._handle_state_to_action(request)
 
         logger.info(f"[TraceID: {trace_id}] 规则引擎决策完成: {decision.get('action')}")
+
+        # 记录到记忆
+        self._store_decision_memory(trace_id, request, decision, memory_context)
+
         return decision
 
     def decide_from_audio(self, audio_bytes: bytes, available_actions: List[str], trace_id: str = "") -> dict:
         """
         音频→ASR→LLM分解→多原子动作（全链路核心方法）。
+        集成记忆系统：检索相关记忆增强决策。
         1. ASR 转写音频为文本
-        2. LLM 将文本分解为多个原子动作
-        3. 返回动作列表（边缘可直接执行，无需再等LLM）
+        2. 检索相关记忆
+        3. LLM 将文本分解为多个原子动作
+        4. 返回动作列表（边缘可直接执行，无需再等LLM）
         """
         logger.info(f"[TraceID: {trace_id}] 音频决策引擎启动，音频大小: {len(audio_bytes)} bytes")
 
@@ -336,11 +369,16 @@ class DecisionEngine:
 
         logger.info(f"[TraceID: {trace_id}] ASR 转写完成: '{text}'")
 
+        # 步骤 1.5: 检索相关记忆
+        memory_context = self._retrieve_memory_context(text)
+
         # 步骤 2: LLM 分解为多原子动作
         actions = _llm_decompose(text, available_actions)
 
         if actions is not None:
             logger.info(f"[TraceID: {trace_id}] LLM 分解完成: {len(actions)} 个原子动作")
+            # 存入记忆
+            self._store_audio_memory(trace_id, text, actions, True)
             return {
                 "status": "ok",
                 "asr_text": text,
@@ -351,11 +389,43 @@ class DecisionEngine:
         logger.info(f"[TraceID: {trace_id}] LLM 不可用，使用规则引擎做简单映射")
         rule_actions = self._rule_decompose(text, available_actions)
 
+        # 存入记忆
+        self._store_audio_memory(trace_id, text, rule_actions, False)
+
         return {
             "status": "ok",
             "asr_text": text,
             "actions": rule_actions,
         }
+
+    def _store_audio_memory(self, trace_id: str, asr_text: str,
+                             actions: List[dict], llm_used: bool):
+        """将音频决策存入记忆"""
+        memory = _get_memory_engine()
+        if memory is None:
+            return
+
+        try:
+            action_names = [a.get("action", "?") for a in actions]
+            content = f"语音指令: '{asr_text}' → 动作: {', '.join(action_names)}"
+            if llm_used:
+                content += " (LLM决策)"
+            else:
+                content += " (规则引擎)"
+
+            memory.remember(
+                content=content,
+                memory_type="episodic",
+                importance=0.7,
+                metadata={
+                    "trace_id": trace_id,
+                    "asr_text": asr_text,
+                    "actions": action_names,
+                    "llm_used": llm_used,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"[Memory] 存储音频记忆失败: {e}")
 
     def _rule_decompose(self, text: str, available_actions: List[str]) -> List[dict]:
         """规则引擎：基于关键词的简单动作映射"""
@@ -406,6 +476,68 @@ class DecisionEngine:
             })
 
         return actions
+
+    def _retrieve_memory_context(self, query: str) -> str:
+        """检索相关记忆作为决策上下文"""
+        memory = _get_memory_engine()
+        if memory is None or not query:
+            return ""
+
+        try:
+            results = memory.recall(query, top_k=3)
+            if results:
+                context_parts = [r.entry.content for r in results]
+                logger.info(f"[Memory] 检索到 {len(results)} 条相关记忆")
+                return "\n".join(context_parts)
+        except Exception as e:
+            logger.warning(f"[Memory] 记忆检索失败: {e}")
+
+        return ""
+
+    def _store_decision_memory(self, trace_id: str, request, result: dict,
+                                memory_context: str = ""):
+        """将决策结果存入记忆"""
+        memory = _get_memory_engine()
+        if memory is None:
+            return
+
+        try:
+            action = result.get("action", "unknown")
+            success = result.get("status") == "ok"
+
+            # 构建记忆内容
+            content = f"决策: action={action}, state={request.state or 'N/A'}"
+            if memory_context:
+                content += f", 参考记忆: {memory_context[:100]}"
+
+            memory.remember(
+                content=content,
+                memory_type="episodic",
+                importance=0.6 if success else 0.4,
+                metadata={
+                    "trace_id": trace_id,
+                    "action": action,
+                    "success": success,
+                },
+            )
+
+            # 记录执行到反思引擎
+            memory.record_execution(
+                trace_id=trace_id,
+                action=action,
+                success=success,
+                context=request.state or "",
+                result=result.get("status", ""),
+            )
+        except Exception as e:
+            logger.warning(f"[Memory] 存储决策记忆失败: {e}")
+
+    def get_memory_stats(self) -> dict:
+        """获取记忆系统统计"""
+        memory = _get_memory_engine()
+        if memory is None:
+            return {"status": "unavailable"}
+        return memory.stats()
 
     def _validate_request(self, request) -> dict:
         """请求校验逻辑"""
