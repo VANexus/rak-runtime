@@ -924,6 +924,27 @@ class DecisionEngine:
                     return result
                 safety.record_action(chosen)
 
+            # 收集认知架构中间状态（五层认知架构展示）
+            cognitive = {}
+            if emotion:
+                es = emotion.state.to_dict()
+                cognitive["emotion"] = {
+                    "joy": round(es.get("joy", 0), 2),
+                    "trust": round(es.get("trust", 0), 2),
+                    "stress": round(es.get("stress", 0), 2),
+                    "confidence": round(es.get("confidence", 0), 2),
+                }
+            if meta and assessment:
+                cognitive["meta_cognition"] = {
+                    "confidence": round(assessment.score if hasattr(assessment, 'score') else 0, 2),
+                    "strategy": assessment.strategy if hasattr(assessment, 'strategy') else "unknown",
+                }
+            if need_engine:
+                needs = need_engine.update()
+                cognitive["needs"] = {"desc": needs.describe()[:50] if needs.describe() else ""}
+            if cognitive:
+                result["cognitive_state"] = cognitive
+
             # 存入语义缓存
             if cache and query:
                 cache.store(query, result, available_actions)

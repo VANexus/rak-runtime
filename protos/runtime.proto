@@ -38,6 +38,7 @@ message ActionResponse {
   float latency_personaplex_ms = 12; // PersonaPlex管线延迟
   float latency_asr_ms = 13;    // ASR管线延迟
   float latency_llm_ms = 14;    // LLM管线延迟
+  string cognitive_state = 15;  // 认知架构中间状态（JSON：情绪/元认知/记忆）
 }
 
 // 【新增】原子动作项

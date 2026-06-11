@@ -175,8 +175,10 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
         try:
             md = dict(context.invocation_metadata())
             force_llm = md.get("force-llm", "").lower() == "true"
-        except Exception:
-            pass
+            if force_llm:
+                logger.info(f"[Execute] force_llm=True，跳过缓存")
+        except Exception as e:
+            logger.debug(f"[Execute] 读取 metadata 失败: {e}")
 
         # 更新世界模型
         if self._world_model:
@@ -209,6 +211,7 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
             )
 
         # 构造响应
+        cognitive = result.get("cognitive_state", {})
         response = runtime_pb2.ActionResponse(
             version="v0",
             status=result.get("status", "error"),
@@ -216,6 +219,7 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
             action=result.get("action", ""),
             params_json=result.get("params_json", "{}"),
             voice_reply=result.get("answer", ""),
+            cognitive_state=json.dumps(cognitive, ensure_ascii=False) if cognitive else "",
         )
 
         if result.get("status") == "error":
