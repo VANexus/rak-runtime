@@ -155,6 +155,12 @@ rak-runtime/
 │   ├── test_action_memory.py
 │   └── test_utils.py
 ├── docs/                           # 文档目录
+├── homework/                       # Python期末综合实验作业
+│   ├── README.md                   # 作业运行说明、环境配置与排错指南
+│   └── web/                        # 聊天机器人Web交互服务
+│       ├── app.py                  # Flask 后端主程序
+│       └── templates/
+│           └── index.html          # 前端交互页面
 ├── AGENTS.md                       # Agent/开发者指南
 ├── CLAUDE.md                       # Claude Code 指南
 └── requirements.txt                # 依赖版本锁定
