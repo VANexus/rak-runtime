@@ -113,7 +113,7 @@ class SemanticCache:
 
     def __init__(self,
                  max_entries: int = 500,
-                 similarity_threshold: float = 0.92,
+                 similarity_threshold: float = 0.97,
                  ttl_seconds: float = 3600,
                  persist_path: str = None):
         self.max_entries = max_entries
@@ -183,7 +183,9 @@ class SemanticCache:
             best_entry.hit_count += 1
             self._semantic_hits += 1
             logger.info("[SemanticCache] 语义命中 (sim=%.3f): %s", best_sim, query[:30])
-            return best_entry.result.copy()
+            result = best_entry.result.copy()
+            result["_similarity"] = best_sim  # 注入真实相似度，供元认知评估
+            return result
 
         # 3. 未命中
         self._misses += 1

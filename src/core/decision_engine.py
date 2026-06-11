@@ -684,7 +684,7 @@ class DecisionEngine:
             cached = cache.lookup(query, available_actions)
             if cached:
                 cache_hit = True
-                cache_similarity = cached.get("_similarity", 0.98)
+                cache_similarity = cached.get("_similarity", 0.0)
                 logger.info("[TraceID: %s] 语义缓存命中: %s", trace_id, cached['action'])
 
                 # 元认知评估：缓存命中但也要检查置信度
