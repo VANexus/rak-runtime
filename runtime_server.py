@@ -207,6 +207,7 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
             trace_id=trace_id,
             action=result.get("action", ""),
             params_json=result.get("params_json", "{}"),
+            voice_reply=result.get("answer", ""),
         )
 
         if result.get("status") == "error":

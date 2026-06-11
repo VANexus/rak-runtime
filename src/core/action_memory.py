@@ -145,11 +145,28 @@ class ActionMemory:
             traj = top[0][1]
             traj.replay_count += 1
             self._replay_hits += 1
+            # 生成默认回复（优先用记录的 answer，否则用模板）
+            action_answers = {
+                "wave_hand": "好的，我来挥挥手~",
+                "shake_head": "好的，我来摇摇头~",
+                "nod": "好的，我来点点头~",
+                "dance": "好的，我来跳个舞~",
+                "lock_open": "好的，我来打开门锁。",
+                "lock_close": "好的，我来关上门锁。",
+                "move_forward": "好的，我往前走。",
+                "move_back": "好的，我往后退。",
+                "light_on": "好的，我来开灯。",
+                "light_off": "好的，我来关灯。",
+                "emergency_stop": "好的，立即停止所有动作！",
+                "idle": "好的，我在这里待命。",
+            }
+            saved_answer = traj.result.get("answer", "") if traj.result else ""
             return {
                 "action": traj.action,
                 "params_json": traj.params_json,
                 "confidence": top[0][0],
                 "source": "action_memory_exact",
+                "answer": saved_answer or action_answers.get(traj.action, f"好的，执行 {traj.action}。"),
             }
 
         # 否则让 LLM 判断
@@ -199,11 +216,32 @@ class ActionMemory:
                         if traj.action == action:
                             traj.replay_count += 1
                             break
+                    # 从匹配的轨迹中获取 answer
+                    matched_answer = ""
+                    for _, traj in top:
+                        if traj.action == action and traj.result:
+                            matched_answer = traj.result.get("answer", "")
+                            break
+                    action_answers = {
+                        "wave_hand": "好的，我来挥挥手~",
+                        "shake_head": "好的，我来摇摇头~",
+                        "nod": "好的，我来点点头~",
+                        "dance": "好的，我来跳个舞~",
+                        "lock_open": "好的，我来打开门锁。",
+                        "lock_close": "好的，我来关上门锁。",
+                        "move_forward": "好的，我往前走。",
+                        "move_back": "好的，我往后退。",
+                        "light_on": "好的，我来开灯。",
+                        "light_off": "好的，我来关灯。",
+                        "emergency_stop": "好的，立即停止所有动作！",
+                        "idle": "好的，我在这里待命。",
+                    }
                     return {
                         "action": action,
                         "params_json": "{}",
                         "confidence": parsed.get("confidence", 0.7),
                         "source": "action_memory_llm",
+                        "answer": matched_answer or action_answers.get(action, f"好的，执行 {action}。"),
                     }
 
         except Exception as e:
