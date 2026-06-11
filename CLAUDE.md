@@ -77,7 +77,12 @@ src/core/
 ├── memory_redis.py         # Redis 后端（TTL + Pub/Sub）
 ├── agentic_rag.py          # Agentic RAG 多跳检索
 ├── audio_pipeline.py       # 音频管线（PersonaPlex 远程 ASR + LLM）
-└── sleep_consolidation.py  # 睡眠整合（记忆巩固+遗忘+反思）
+├── sleep_consolidation.py  # 睡眠整合（记忆巩固+遗忘+反思）
+├── cog_rec.py              # CogRec 神经符号混合（LLM 教规则引擎）
+├── action_memory.py        # 动作记忆（记录-重放，<1ms 绕过 LLM）
+├── prompt_evolution.py     # 双流提示词进化（战术+战略）
+├── safety_governance.py    # 安全治理（LLM 驱动的运行时安全）
+└── _utils.py               # 共享工具（原子 JSON 写入）
 
 src/tools/
 ├── __init__.py             # MQTTPublisher 导出
@@ -85,7 +90,12 @@ src/tools/
 
 src/mcp/
 └── skill_mcp_server.py     # MCP JSON-RPC 服务器（21 工具 + 14 资源）
-└── inner_loop.py           # 内心循环（Agent 的心跳）
+
+src/prompts/                # 提示词模板（Jinja2）
+├── config.yaml             # 共享配置（人设、动作列表、输出格式、规则）
+├── decision.yaml           # 单动作决策模板
+├── decompose.yaml          # 多动作分解模板
+└── rag.yaml                # RAG 推理模板
 ```
 
 ### 四层决策架构（元认知增强）

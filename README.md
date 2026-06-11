@@ -1,193 +1,189 @@
 # rak-runtime
 
-> RakTec / Xra AIoT 平台的 Python AI 运行时 —— 具身智能决策核心
+> RakTec / Xra AIoT 平台的活体认知推理引擎 —— 具身智能决策核心
 
 ## 定位
 
-rak-runtime 是具身 AI 系统的**边缘推理引擎**，负责：
+rak-runtime 是具身 AI 系统的**认知推理引擎**，负责：
 
-1. **语音感知**：ASR 语音转文字（Whisper 本地 + PersonaPlex 远程双引擎）
-2. **认知决策**：LLM 驱动的自然语言 → 原子动作分解（支持多步规划）
-3. **记忆系统**：三层认知记忆（工作 / 短期 / 长期）+ Agentic RAG 多跳检索
-4. **策略学习**：在线策略模型（REINFORCE）+ LoRA 微调知识沉淀
-5. **工具协议**：MCP 技能服务器，暴露技能网络给 LLM 发现和调用
+1. **认知决策**：LLM 驱动的自然语言 → 原子动作分解（15 步决策管线）
+2. **记忆系统**：三层认知记忆 + 活体知识图谱 + 联想记忆流
+3. **元认知**：置信度评估、策略选择、自我反思
+4. **生命体架构**：情绪动力学、需求引擎、内心循环、自我认知
+5. **学习闭环**：CogRec（LLM 教规则）、ActionMemory（记录-重放）、PromptEvolution（双流进化）
+
+**核心原则：纯 Agent 工程，零本地推理，优雅降级。**
+
+## 五层认知架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│            Inner Loop (心跳)                          │
+│   持续运行：感知→情绪→需求→联想→决策→表达（或沉默）     │
+├─────────────────────────────────────────────────────┤
+│            Consciousness Layer                       │
+│   SelfModel · EmotionEngine · NeedEngine             │
+│   我是谁 · 我感受如何 · 我需要什么                     │
+├─────────────────────────────────────────────────────┤
+│            Memory Layer (Living Graph)                │
+│   LivingGraph · MemoryStream · MemoryEngine          │
+│   扩散激活 · 联想涌现 · 传统检索                      │
+├─────────────────────────────────────────────────────┤
+│            Meta-Cognitive Layer                       │
+│   MetaCognition · ProactiveEngine                    │
+│   我有多大把握 · 我应该主动做什么                      │
+├─────────────────────────────────────────────────────┤
+│            User Model Layer                           │
+│   UserModel · 意图推断 · 偏好学习 · 纠正历史          │
+├─────────────────────────────────────────────────────┤
+│            Execution Layer                            │
+│   SemanticCache · PromptEngine · LLM · RuleEngine    │
+└─────────────────────────────────────────────────────┘
+```
 
 ## 核心特性
 
-### 🎤 ASR 语音感知（双引擎）
+### 🧠 15 步决策管线
 
-| 方案 | 架构 | 延迟 | 运行环境 | 适用场景 |
-|------|------|------|----------|----------|
-| Whisper | 本地 ASR → 文本 → MQTT | ~500ms | 本地 Mac/PC | 开发调试、无 GPU 环境 |
-| PersonaPlex | 端到端全双工音频流 | ~200ms | 服务器 GPU | 生产环境、低延迟要求 |
+`DecisionEngine.decide()` 完整流程：
 
-### 🧠 认知记忆系统
+1. 复合命令检测（多动作分解）
+2. 对话状态记录
+3. 语义缓存查找（<1ms）+ 元认知置信度检查
+4. CogRec 规则匹配（<1ms）
+5. ActionMemory 重放（<1ms）
+6. 用户纠正历史检查
+7. 用户画像意图推断
+8. 上下文组装（SelfModel + Emotion + Needs + Memory + InnerLoop + ConversationState）
+9. 双通道记忆检索（LivingGraph 扩散激活 + 传统 TopK）
+10. PromptEvolution 指南注入
+11. 系统提示词构建
+12. LLM 深思（~1s）+ 流式提前返回
+13. 元认知置信度评估 + 策略选择
+14. 安全治理检查
+15. 缓存 + 记忆 + 学习 + 图谱 + 规则 + 反馈全面更新
 
-模仿生物海马体的三层记忆架构：
+### 🔗 CogRec 神经符号混合
 
-- **工作记忆**：当前上下文窗口（滑动窗口，7±2 项）
-- **短期记忆**：最近对话和事件（LRU 策略，按时间衰减）
-- **长期记忆**：知识库和经验（向量检索，ANN 语义查询）
+LLM 成功决策自动提取为规则引擎规则。规则随时间累积，LLM 调用比例逐步降低。纠正规则获得最高置信度（0.95）。
 
-三种记忆形态：
-- 事实性记忆（Episodic）—— 发生了什么
-- 程序性记忆（Procedural）—— 怎么做（技能/LoRA）
-- 语义记忆（Semantic）—— 是什么（知识图谱）
+### 📝 ActionMemory 记录-重放
 
-### 🔍 Agentic RAG 多跳检索推理
+记录完整决策轨迹，相似查询直接重放（<1ms）绕过 LLM。LLM 评估模糊匹配是否适合重放。
 
-不同于单次 RAG，Agentic RAG 实现迭代式深思：
+### 🔄 PromptEvolution 双流进化
 
-1. **RETRIEVE**：粗粒度初始检索
-2. **REASON**：判断证据是否充分
-3. **REFINE**：不充分则精化查询
-4. **SYNTHESIZE**：跨文档综合推理
+- **战术流**：短期纠正，成功 N 次后自动过期
+- **战略流**：长期原则，永不过期
 
-支持内置规则引擎和 LLM 推理两种模式，LLM 不可用时自动降级。
+### 🛡️ SafetyGovernance 安全治理
 
-### 💾 持久化存储（PostgreSQL + Redis）
+LLM 驱动的运行时安全判断。唯一硬约束：`emergency_stop` 始终允许。所有其他安全判断上下文感知。
 
-| 后端 | 存储内容 | 特性 |
-|------|----------|------|
-| PostgreSQL | 长期记忆、向量检索、执行指标 | pgvector 扩展、全文搜索、连接池 |
-| Redis | 短期记忆、工作记忆、执行日志 | TTL 自动过期、微秒级读写、Pub/Sub |
-| SQLite | 本地回退 | 零依赖、单文件 |
-| JSON 文件 | 最小回退 | 纯标准库 |
+### 💭 情绪动力学
 
-所有后端支持自动降级：PostgreSQL 不可用 → SQLite，Redis 不可用 → JSON 文件。
+六维连续变量（joy/fear/trust/surprise/anger/sadness），事件驱动更新，~5 分钟半衰期。影响行为：压力大→更简洁谨慎，自信→更果断。
 
-### 🏋️ LoRA 微调训练
+### 🎯 元认知
 
-将执行日志和程序性记忆转化为训练数据，通过 LoRA 微调本地小模型（Qwen2-0.5B）：
+置信度评估（缓存 0.30 + 记忆 0.15 + LLM 0.40 + 规则 0.15），策略选择（CACHE/RULE/LLM/HYBRID/ASK_USER）。低置信度时主动询问而非硬答。
 
-- 快速动作分类（<10ms，替代 LLM API 调用）
-- 离线场景下的决策能力
-- 个性化行为学习
+### 🌊 LivingGraph 活体知识图谱
 
-训练流程：记忆收集 → JSONL 导出 → LoRA 微调 → 适配器导出 → 推理加载
-
-### 🤖 策略模型（基底神经节）
-
-单层线性网络（softmax 策略），模仿大脑基底神经节：
-
-- **快思考**：<1ms 推理延迟，直接输出离散动作 ID
-- **在线学习**：REINFORCE 风格策略梯度更新
-- **ε-greedy 探索**：平衡利用与探索
-
-### 🔧 MCP 技能服务器
-
-MCP（Model Context Protocol）JSON-RPC 服务器，让 LLM 可以：
-
-- 列出所有技能（工具发现）
-- 激活技能（工具调用）
-- 查询设备状态（资源访问）
-- 搜索记忆（资源访问）
-
-### 🌊 双管线音频处理
-
-```
-音频输入 → ┌─ PersonaPlex ──→ 语音回复（即时，超低延迟）
-            └─ ASR → LLM ──→ 动作列表（规划）+ 提示词反哺
-```
-
-PersonaPlex 负责即时语音回复，ASR+LLM 负责深度动作决策，LLM 生成的上下文提示词反哺给 PersonaPlex 让语音回复更智能。
+节点带状态（entity/concept/event/skill/emotion），边带权重+时间衰减。扩散激活替代 TopK 检索，赫布学习自动增强共激活连接。
 
 ### 💤 睡眠整合
 
-模仿人类睡眠中的记忆巩固：
-
-1. 短期 → 长期记忆迁移（重要性筛选）
-2. 低显著性记忆遗忘（突触修剪）
-3. 反思学习批处理（经验提取）
-4. 记忆压缩（相似记忆合并）
+短期→长期记忆迁移、低显著性遗忘、批量反思、相似记忆压缩。
 
 ## 项目结构
 
 ```
 rak-runtime/
+├── runtime_server.py               # gRPC 服务器入口 (:50051)
 ├── src/
-│   ├── core/
-│   │   ├── memory_engine.py        # 认知记忆引擎（三层记忆 + 反思学习）
-│   │   ├── memory_persistence.py   # 持久化后端（SQLite + JSON 文件）
-│   │   ├── memory_postgres.py      # PostgreSQL 后端（pgvector + 连接池）
-│   │   ├── memory_redis.py         # Redis 后端（TTL + Pub/Sub）
-│   │   ├── agentic_rag.py          # Agentic RAG 多跳检索引擎
-│   │   ├── decision_engine.py      # 决策引擎（LLM + 规则引擎 + 记忆集成）
-│   │   ├── policy_model.py         # 策略模型（基底神经节，在线学习）
-│   │   ├── audio_pipeline.py       # 双管线音频处理（PersonaPlex + ASR+LLM）
-│   │   ├── sleep_consolidation.py  # 睡眠整合（记忆巩固 + 遗忘 + 反思）
-│   │   └── lora_trainer.py         # LoRA 微调训练器
+│   ├── core/                       # 28 个认知模块
+│   │   ├── decision_engine.py      # 决策引擎（中央调度器）
+│   │   ├── prompt_engine.py        # 提示词引擎
+│   │   ├── semantic_cache.py       # 语义缓存
+│   │   ├── learning_loop.py        # 学习闭环
+│   │   ├── memory_engine.py        # 三层认知记忆
+│   │   ├── memory_persistence.py   # SQLite + JSON 持久化
+│   │   ├── memory_postgres.py      # PostgreSQL 后端
+│   │   ├── memory_redis.py         # Redis 后端
+│   │   ├── memory_stream.py        # 联想记忆流
+│   │   ├── living_graph.py         # 活体知识图谱
+│   │   ├── sleep_consolidation.py  # 睡眠整合
+│   │   ├── agentic_rag.py          # Agentic RAG 多跳检索
+│   │   ├── audio_pipeline.py       # 双管线音频处理
+│   │   ├── world_model.py          # 世界模型
+│   │   ├── user_model.py           # 用户模型
+│   │   ├── meta_cognition.py       # 元认知
+│   │   ├── proactive_engine.py     # 主动智能
+│   │   ├── self_model.py           # 自我认知
+│   │   ├── need_engine.py          # 需求引擎
+│   │   ├── emotion_state.py        # 情绪动力学
+│   │   ├── inner_loop.py           # 内心循环
+│   │   ├── conversation_state.py   # 对话状态
+│   │   ├── cog_rec.py              # CogRec 神经符号混合
+│   │   ├── action_memory.py        # 动作记忆
+│   │   ├── prompt_evolution.py     # 双流提示词进化
+│   │   ├── safety_governance.py    # 安全治理
+│   │   ├── policy_model.py         # 策略模型（基底神经节）
+│   │   └── _utils.py               # 共享工具
 │   ├── tools/
-│   │   ├── asr_tool.py             # Whisper ASR 工具类
-│   │   ├── personaplex_client.py   # PersonaPlex ASR WebSocket 客户端
-│   │   └── mqtt_publisher.py       # MQTT 消息发布工具
+│   │   └── __init__.py             # MQTTPublisher
 │   ├── mcp/
 │   │   └── skill_mcp_server.py     # MCP 技能服务器
-│   └── models/
-│       └── action.py               # 动作数据模型
+│   └── prompts/                    # 提示词模板（Jinja2）
+│       ├── config.yaml
+│       ├── decision.yaml
+│       ├── decompose.yaml
+│       └── rag.yaml
 ├── protos/
 │   └── runtime.proto               # gRPC 协议定义
 ├── generated/                      # 生成的 gRPC 代码
-├── realtime_asr.py                 # Whisper ASR 方案入口
-├── realtime_personaplex.py         # PersonaPlex ASR 方案入口
-├── train_lora.py                   # LoRA 训练脚本入口
-├── test_e2e_full.py                # 端到端测试
-├── test_server.py                  # 服务器测试
+├── tests/                          # 单元测试
+│   ├── conftest.py                 # 共享 fixtures
+│   ├── test_meta_cognition.py
+│   ├── test_memory_engine.py
+│   ├── test_emotion_state.py
+│   ├── test_safety_governance.py
+│   ├── test_cog_rec.py
+│   ├── test_prompt_evolution.py
+│   ├── test_semantic_cache.py
+│   ├── test_action_memory.py
+│   └── test_utils.py
 ├── docs/                           # 文档目录
 ├── AGENTS.md                       # Agent/开发者指南
-├── TODO.md                         # 任务清单
+├── CLAUDE.md                       # Claude Code 指南
 └── requirements.txt                # 依赖版本锁定
 ```
 
 ## 快速开始
 
-### 环境准备
-
 ```bash
-# 克隆仓库
 git clone https://github.com/VANexus/rak-runtime.git
 cd rak-runtime
-
-# 创建虚拟环境并安装依赖
-uv venv --python 3.11
-source .venv/bin/activate
+uv venv --python 3.11 && source .venv/bin/activate
 uv pip install -r requirements.txt
+python runtime_server.py       # 启动 gRPC 服务器 :50051
 ```
 
-### 方案 1：Whisper ASR（默认，本地可运行）
+### 测试
 
 ```bash
-python realtime_asr.py
-```
-
-### 方案 2：PersonaPlex ASR（低延迟，推荐生产）
-
-```bash
-# 前置条件：服务器端已启动 PersonaPlex 服务
-python realtime_personaplex.py
-```
-
-### LoRA 训练
-
-```bash
-# 收集训练数据
-python train_lora.py collect --log data/execution_log.jsonl
-
-# 执行 LoRA 微调
-python train_lora.py train --data data/training.jsonl
-
-# 测试推理
-python train_lora.py test --input "开门"
-
-# 完整流程
-python train_lora.py all --log data/execution_log.jsonl
+pytest tests/                        # 运行所有单元测试
+pytest tests/test_meta_cognition.py  # 运行特定测试
+python test_server.py                # StreamASR 集成测试
+python test_client.py                # Execute 文本集成测试
+python test_e2e_full.py              # 端到端全链路测试
 ```
 
 ## gRPC 接口
 
 - **RuntimeService.Execute**：单动作决策（输入状态/动作，返回动作 + 参数）
 - **RuntimeService.StreamASR**：流式语音识别
-- **RuntimeService.AudioDecide**：音频 → ASR → LLM 分解 → 多原子动作
 
 详见 [docs/grpc-contracts.md](./docs/grpc-contracts.md)
 
@@ -196,17 +192,11 @@ python train_lora.py all --log data/execution_log.jsonl
 - [文档索引](./docs/INDEX.md)
 - [架构设计](./docs/architecture.md)
 - [Agent 开发指南](./AGENTS.md)
+- [Claude Code 指南](./CLAUDE.md)
 - [gRPC 契约](./docs/grpc-contracts.md)
-- [RakMessage 协议](./docs/rakmessage-mvp.md)
-- [PersonaPlex 部署](./docs/personaplex-deployment.md)
+- [参考文献](./docs/references.md)
 
-## 对齐契约
-
-- gRPC proto：[protos/runtime.proto](./protos/runtime.proto)
-- gRPC 语义与样例：[docs/grpc-contracts.md](./docs/grpc-contracts.md)
-- params_json 映射 RakMessage.params：[docs/rakmessage-mvp.md](./docs/rakmessage-mvp.md)
-
-## MVP 最小动作集
+## MVP 动作集
 
 `shake_head` · `wave_hand` · `lock_open` · `lock_close` · `move_forward` · `move_back` · `turn_left` · `turn_right` · `dance` · `nod` · `light_on` · `light_off` · `emergency_stop` · `idle`
 
@@ -215,20 +205,15 @@ python train_lora.py all --log data/execution_log.jsonl
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic API Key | — |
-| `ANTHROPIC_BASE_URL` | Anthropic API 代理地址 | `https://token-plan-cn.xiaomimimo.com/anthropic` |
-| `ANTHROPIC_MODEL` | LLM 模型名 | `mimo-v2.5-pro` |
+| `ANTHROPIC_BASE_URL` | API 代理地址 | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| `ANTHROPIC_MODEL` | 模型名 | `mimo-v2.5-pro` |
 | `RAG_POSTGRES_DSN` | PostgreSQL 连接串 | `postgresql://rak:***@localhost:5432/rak_memory` |
 | `MQTT_BROKER_HOST` | MQTT Broker 地址 | `localhost` |
 | `MQTT_BROKER_PORT` | MQTT Broker 端口 | `1883` |
-| `PERSONAPLEX_SERVER` | PersonaPlex WebSocket 地址 | `ws://8.129.26.180:8998/ws` |
+| `PERSONAPLEX_SERVER` | PersonaPlex WebSocket | `ws://8.129.26.180:8998/ws` |
 
-## 依赖
+## 对齐契约
 
-- Python 3.11+
-- whisper / openai-whisper（ASR）
-- anthropic（LLM 客户端）
-- paho-mqtt（MQTT）
-- psycopg2（PostgreSQL）
-- redis（Redis）
-- peft / transformers / datasets（LoRA 训练）
-- grpcio / grpcio-tools（gRPC）
+- gRPC proto：[protos/runtime.proto](./protos/runtime.proto)
+- gRPC 语义：[docs/grpc-contracts.md](./docs/grpc-contracts.md)
+- 与 go-kernel 分工：go-kernel 负责 SkillNet/认知路由/PA-HPS，rak-runtime 负责深度推理/记忆/元认知
