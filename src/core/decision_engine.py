@@ -462,7 +462,7 @@ def _llm_decide(system_prompt: str, user_message: str,
             try:
                 with client.messages.stream(
                     model=model,
-                    max_tokens=512,
+                    max_tokens=256,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_message}],
                     extra_body={"thinking": {"type": "disabled"}},
