@@ -632,7 +632,7 @@ class DecisionEngine:
         if stream:
             stream.start()
 
-    def decide(self, request) -> dict:
+    def decide(self, request, force_llm: bool = False) -> dict:
         """
         核心决策逻辑 — 元认知增强版。
 
@@ -680,7 +680,10 @@ class DecisionEngine:
         cache_hit = False
         cache_similarity = 0.0
 
-        if cache and query:
+        # force_llm 模式：跳过所有缓存，直接走 LLM
+        if force_llm:
+            logger.info("[TraceID: %s] force_llm 模式，跳过缓存", trace_id)
+        elif cache and query:
             cached = cache.lookup(query, available_actions)
             if cached:
                 cache_hit = True
@@ -716,7 +719,7 @@ class DecisionEngine:
         # ── 步骤 1.5: CogRec 规则匹配 + ActionMemory 重放 ──
         # CogRec: LLM 教的规则，<1ms 命中
         cog_rec = _get_cog_rec()
-        if cog_rec and query:
+        if not force_llm and cog_rec and query:
             rule_result = cog_rec.match(query, available_actions)
             if rule_result:
                 result = {"status": "ok", **rule_result}
@@ -729,7 +732,7 @@ class DecisionEngine:
 
         # ActionMemory: 完整轨迹重放，<1ms 命中
         action_mem = _get_action_memory()
-        if action_mem and query:
+        if not force_llm and action_mem and query:
             replay_result = action_mem.replay(query, available_actions)
             if replay_result:
                 result = {"status": "ok", **replay_result}

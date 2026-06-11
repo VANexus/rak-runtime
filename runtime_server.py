@@ -170,6 +170,14 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
         trace_id = request.trace_id or f"exec-{self._request_count}"
         logger.info(f"[Execute] trace_id={trace_id}, action={request.action}")
 
+        # 读取 gRPC metadata 中的 force-llm 标志
+        force_llm = False
+        try:
+            md = dict(context.invocation_metadata())
+            force_llm = md.get("force-llm", "").lower() == "true"
+        except Exception:
+            pass
+
         # 更新世界模型
         if self._world_model:
             try:
@@ -179,7 +187,7 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
 
         # 决策
         try:
-            result = self.decision_engine.decide(request)
+            result = self.decision_engine.decide(request, force_llm=force_llm)
         except Exception as e:
             logger.error(f"决策引擎异常: {e}", exc_info=True)
             result = {
