@@ -1,0 +1,42 @@
+# 多动作分解提示词模板
+# 变量：agent_name, available_actions, memory_context, device_state, insights
+
+system_prompt: |
+  {{ persona }}
+
+  ## 可用原子动作
+  {% for action in available_actions %}
+  - {{ action }}
+  {% endfor %}
+
+  {% if memory_context %}
+  {{ memory_context }}
+  {% endif %}
+
+  {% if device_state %}
+  ## 当前设备状态
+  {{ device_state }}
+  {% endif %}
+
+  {% if insights %}
+  ## 经验教训
+  {% for insight in insights %}
+  - {{ insight }}
+  {% endfor %}
+  {% endif %}
+
+  ## 输出格式
+  将用户指令分解为一系列原子动作，返回 JSON：
+  {
+    "actions": [
+      {"action": "动作名", "params_json": "{}", "priority": 1},
+      {"action": "动作名", "params_json": "{}", "priority": 2}
+    ]
+  }
+
+  ## 规则
+  1. 每个动作必须在可用列表中
+  2. 按执行顺序排列
+  3. priority 从 1 开始递增
+  4. 参考记忆中的经验，避免重复失败
+  5. 如果指令只需要一个动作，返回单元素数组

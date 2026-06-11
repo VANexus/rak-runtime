@@ -111,7 +111,7 @@ class WorkingMemory:
         # 超出容量时，移除最旧的
         while len(self.items) > self.max_items:
             self.items.popitem(last=False)
-        logger.debug(f"[WorkingMemory] 添加: {entry.id} (当前 {len(self.items)} 项)")
+        logger.debug("[WorkingMemory] 添加: %s (当前 %s 项)", entry.id, len(self.items))
 
     def get_context(self, max_tokens: int = 2000) -> str:
         """获取当前上下文（用于 LLM prompt）"""
@@ -194,7 +194,7 @@ class LongTermMemory:
         self.items[entry.id] = entry
         if entry.embedding:
             self._embeddings.append((entry.id, entry.embedding))
-        logger.debug(f"[LongTermMemory] 添加: {entry.id} (总计 {len(self.items)} 条)")
+        logger.debug("[LongTermMemory] 添加: %s (总计 %s 条)", entry.id, len(self.items))
 
     def search(self, query_embedding: List[float], top_k: int = 5,
                memory_types: Optional[List[str]] = None,
@@ -266,7 +266,7 @@ class LongTermMemory:
             self._embeddings = [(eid, emb) for eid, emb in self._embeddings if eid != entry_id]
 
         if to_remove:
-            logger.info(f"[LongTermMemory] 修剪 {len(to_remove)} 条低显著性记忆")
+            logger.info("[LongTermMemory] 修剪 %s 条低显著性记忆", len(to_remove))
 
 
 # ========== 反思学习引擎 ==========
@@ -335,8 +335,8 @@ class ReflectionEngine:
             },
         )
 
-        logger.info(f"[ReflectionEngine] 反思完成: 成功率={success_rate:.2f}, "
-                    f"样本={len(recent)}, 重要性={entry.importance:.2f}")
+        logger.info("[ReflectionEngine] 反思完成: 成功率=%.2f, 样本=%d, 重要性=%.2f",
+                    success_rate, len(recent), entry.importance)
 
         return entry
 
@@ -381,21 +381,35 @@ class CognitiveMemoryEngine:
     - 执行闭环：决策 → 执行 → 反馈 → 记忆 → 下次决策
     """
 
-    def __init__(self, embed_fn=None, llm_client=None):
+    def __init__(self, embed_fn=None, llm_client=None, persistence=None):
         """
         Args:
             embed_fn: 向量生成函数 (text) -> List[float]
             llm_client: LLM 客户端（用于反思）
+            persistence: PersistentMemoryManager 实例（可选，提供持久化能力）
         """
         self.working = WorkingMemory(max_items=10)
         self.short_term = ShortTermMemory(max_items=100)
         self.long_term = LongTermMemory(max_items=10000)
         self.reflection = ReflectionEngine(llm_client)
+        self.persistence = persistence
+
+        # 默认使用轻量级字符级 embedding（无外部依赖）
+        if embed_fn is None:
+            try:
+                from src.core.semantic_cache import _simple_embed
+                embed_fn = _simple_embed
+            except ImportError:
+                pass
         self.embed_fn = embed_fn
 
         # 统计
         self._total_queries = 0
         self._total_stores = 0
+
+        # 从持久化加载历史记忆
+        if self.persistence:
+            self._load_from_persistence()
 
     def remember(self, content: str, memory_type: str = "episodic",
                  importance: float = 0.5, metadata: Dict = None) -> MemoryEntry:
@@ -415,7 +429,7 @@ class CognitiveMemoryEngine:
             try:
                 embedding = self.embed_fn(content)
             except Exception as e:
-                logger.warning(f"[Memory] embedding 生成失败: {e}")
+                logger.warning("[Memory] embedding 生成失败: %s", e)
 
         entry = MemoryEntry(
             id=entry_id,
@@ -430,10 +444,19 @@ class CognitiveMemoryEngine:
         # 根据重要性选择记忆层
         if importance >= 0.8:
             self.long_term.add(entry)
-            logger.info(f"[Memory] 存入长期记忆: {entry_id} (importance={importance:.2f})")
+            # 高重要性记忆立即持久化
+            if self.persistence:
+                try:
+                    self.persistence.save_long_term(
+                        entry=asdict(entry),
+                        embedding=embedding if embedding else None,
+                    )
+                except Exception as e:
+                    logger.warning("[Memory] 持久化写入失败: %s", e)
+            logger.info("[Memory] 存入长期记忆: %s (importance=%.2f)", entry_id, importance)
         elif importance >= 0.3:
             self.short_term.add(entry)
-            logger.info(f"[Memory] 存入短期记忆: {entry_id} (importance={importance:.2f})")
+            logger.info("[Memory] 存入短期记忆: %s (importance=%.2f)", entry_id, importance)
 
         # 总是加入工作记忆
         self.working.add(entry)
@@ -457,16 +480,35 @@ class CognitiveMemoryEngine:
             try:
                 query_embedding = self.embed_fn(query)
             except Exception as e:
-                logger.warning(f"[Memory] 查询 embedding 生成失败: {e}")
+                logger.warning("[Memory] 查询 embedding 生成失败: %s", e)
 
         results = []
 
-        # 1. 搜索长期记忆（向量检索）
+        # 1. 搜索长期记忆（向量检索 + 关键词兜底）
         if query_embedding:
             long_term_results = self.long_term.search(
                 query_embedding, top_k=top_k, memory_types=memory_types
             )
             results.extend(long_term_results)
+
+        # 关键词兜底：向量检索可能因稀疏 embedding 漏掉精确匹配
+        query_lower = query.lower()
+        seen_ids = {r.entry.id for r in results}
+        for entry in self.long_term.items.values():
+            if entry.id in seen_ids:
+                continue
+            if memory_types and entry.memory_type not in memory_types:
+                continue
+            if query_lower in entry.content.lower():
+                results.append(MemorySearchResult(
+                    entry=entry, similarity=0.85, score=0.85 * entry.salience
+                ))
+
+        # 精确关键词匹配优先排序
+        for r in results:
+            if query_lower in r.entry.content.lower():
+                r.score += 1.0  # 确保精确匹配排在最前
+        results.sort(key=lambda x: x.score, reverse=True)
 
         # 2. 搜索短期记忆（线性扫描）
         for entry in self.short_term.values():
@@ -475,8 +517,9 @@ class CognitiveMemoryEngine:
             sim = 0.0
             if query_embedding and entry.embedding:
                 sim = self.long_term._cosine_similarity(query_embedding, entry.embedding)
-            elif query.lower() in entry.content.lower():
-                sim = 0.8  # 关键词匹配
+            # 关键词匹配（即使有 embedding 也作为补充）
+            if sim < 0.5 and query.lower() in entry.content.lower():
+                sim = max(sim, 0.8)
             if sim > 0.3:
                 results.append(MemorySearchResult(
                     entry=entry, similarity=sim, score=sim * entry.salience
@@ -489,8 +532,9 @@ class CognitiveMemoryEngine:
             sim = 0.0
             if query_embedding and entry.embedding:
                 sim = self.long_term._cosine_similarity(query_embedding, entry.embedding)
-            elif query.lower() in entry.content.lower():
-                sim = 0.9
+            # 关键词匹配
+            if sim < 0.5 and query.lower() in entry.content.lower():
+                sim = max(sim, 0.9)
             if sim > 0.3:
                 results.append(MemorySearchResult(
                     entry=entry, similarity=sim, score=sim * entry.salience
@@ -519,13 +563,17 @@ class CognitiveMemoryEngine:
         to_consolidate = self.short_term.consolidate(threshold=0.7)
         for entry in to_consolidate:
             self.long_term.add(entry)
-            logger.info(f"[Memory] 整合: {entry.id} 短期 → 长期 (salience={entry.salience:.2f})")
+            logger.info("[Memory] 整合: %s 短期 → 长期 (salience=%.2f)", entry.id, entry.salience)
 
         # 修剪低显著性的长期记忆
         self.long_term.prune(min_salience=0.05)
 
-        logger.info(f"[Memory] 整合完成: 短期={len(list(self.short_term.values()))}条, "
-                    f"长期={len(self.long_term.items)}条")
+        logger.info("[Memory] 整合完成: 短期=%d条, 长期=%d条",
+                    len(list(self.short_term.values())), len(self.long_term.items))
+
+        # 整合后持久化
+        if self.persistence:
+            self.save()
 
     def reflect_and_learn(self) -> Optional[MemoryEntry]:
         """反思学习"""
@@ -551,3 +599,100 @@ class CognitiveMemoryEngine:
         """生成记忆 ID"""
         hash_val = hashlib.md5(content.encode()).hexdigest()[:8]
         return f"mem_{int(time.time())}_{hash_val}"
+
+    # ========== 持久化 ==========
+
+    def _load_from_persistence(self):
+        """从持久化存储加载历史记忆"""
+        if not self.persistence:
+            return
+
+        try:
+            # 加载长期记忆
+            long_term_data = self.persistence.load_long_term()
+            embeddings_map = self.persistence.load_embeddings()
+
+            loaded = 0
+            for mem_dict in long_term_data:
+                entry = MemoryEntry(
+                    id=mem_dict["id"],
+                    content=mem_dict["content"],
+                    memory_type=mem_dict["memory_type"],
+                    layer=mem_dict.get("layer", "long_term"),
+                    importance=mem_dict.get("importance", 0.5),
+                    embedding=embeddings_map.get(mem_dict["id"], []),
+                    metadata=mem_dict.get("metadata", {}),
+                    created_at=mem_dict.get("created_at", 0),
+                    last_accessed=mem_dict.get("last_accessed", 0),
+                    access_count=mem_dict.get("access_count", 0),
+                    decay_rate=mem_dict.get("decay_rate", 0.01),
+                )
+                self.long_term.add(entry)
+                loaded += 1
+
+            # 加载短期记忆
+            short_term_data = self.persistence.load_short_term()
+            for mem_dict in short_term_data:
+                entry = MemoryEntry(
+                    id=mem_dict["id"],
+                    content=mem_dict["content"],
+                    memory_type=mem_dict["memory_type"],
+                    layer="short_term",
+                    importance=mem_dict.get("importance", 0.5),
+                    metadata=mem_dict.get("metadata", {}),
+                    created_at=mem_dict.get("created_at", 0),
+                    last_accessed=mem_dict.get("last_accessed", 0),
+                    access_count=mem_dict.get("access_count", 0),
+                )
+                self.short_term.add(entry)
+                loaded += 1
+
+            if loaded > 0:
+                logger.info("[Memory] 从持久化加载 %d 条记忆 (长期=%d, 短期=%d)",
+                            loaded, len(self.long_term.items), len(list(self.short_term.values())))
+        except Exception as e:
+            logger.warning("[Memory] 加载持久化记忆失败: %s", e)
+
+    def save(self):
+        """将当前记忆状态保存到持久化存储"""
+        if not self.persistence:
+            return
+
+        try:
+            # 保存长期记忆
+            for entry in self.long_term.items.values():
+                self.persistence.save_long_term(
+                    entry={
+                        "id": entry.id,
+                        "content": entry.content,
+                        "memory_type": entry.memory_type,
+                        "layer": "long_term",
+                        "importance": entry.importance,
+                        "metadata": entry.metadata,
+                        "created_at": entry.created_at,
+                        "last_accessed": entry.last_accessed,
+                        "access_count": entry.access_count,
+                        "decay_rate": entry.decay_rate,
+                    },
+                    embedding=entry.embedding if entry.embedding else None,
+                )
+
+            # 保存短期记忆
+            short_term_list = []
+            for entry in self.short_term.values():
+                short_term_list.append({
+                    "id": entry.id,
+                    "content": entry.content,
+                    "memory_type": entry.memory_type,
+                    "importance": entry.importance,
+                    "metadata": entry.metadata,
+                    "created_at": entry.created_at,
+                    "last_accessed": entry.last_accessed,
+                    "access_count": entry.access_count,
+                })
+            self.persistence.save_short_term(short_term_list)
+
+            logger.info("[Memory] 持久化完成: 长期=%d, 短期=%d",
+                        len(self.long_term.items), len(list(self.short_term.values())))
+        except Exception as e:
+            logger.warning("[Memory] 持久化保存失败: %s", e)

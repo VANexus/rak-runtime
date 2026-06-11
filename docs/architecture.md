@@ -55,14 +55,14 @@ rak-runtime 是具身 AI 系统的**边缘推理引擎**：接收语音或文本
 
 ## 核心模块详解
 
-### 1. ASR 感知层
+### 1. 音频管线
 
-双引擎设计，根据环境选择：
+`DualPipelineProcessor` 双管线设计（纯远程 API，无本地推理）：
 
-| 引擎 | 类 | 特性 |
+| 管线 | 引擎 | 特性 |
 |------|------|------|
-| Whisper | `ASRTool` | 本地推理，tiny/base/small 模型，延迟 ~500ms |
-| PersonaPlex | `PersonaPlexStream` | WebSocket 流式，GPU 推理，延迟 ~200ms，支持边说边转 |
+| 即时回复 | PersonaPlex | WebSocket 流式，GPU 推理，延迟 ~200ms |
+| 深度决策 | ASR + LLM | 语音→文本→LLM 分解→原子动作列表 |
 
 **音频格式**：16kHz 采样率，16-bit 整数，单声道 PCM。
 
@@ -82,24 +82,28 @@ rak-runtime 是具身 AI 系统的**边缘推理引擎**：接收语音或文本
 
 ### 3. 决策引擎
 
-`DecisionEngine` 是核心决策中心：
+`DecisionEngine` 是核心决策中心，15 步决策管线：
 
-**单动作决策**（`decide`）：
-1. 输入校验
-2. 检索相关记忆
-3. LLM 决策（优先）→ 失败时回退到规则引擎
-4. 存入记忆
-
-**音频决策**（`decide_from_audio`）：
-1. ASR 转写音频为文本
-2. 检索相关记忆增强上下文
-3. LLM 将文本分解为多个原子动作
-4. 边缘可直接执行，无需再等 LLM
+1. 复合命令检测（多动作分解）
+2. 对话状态记录
+3. 语义缓存查找（<1ms）+ 元认知置信度检查
+4. CogRec 规则匹配（<1ms）
+5. ActionMemory 重放（<1ms）
+6. 用户纠正历史检查
+7. 用户画像意图推断
+8. 上下文组装（SelfModel + Emotion + Needs + Memory + InnerLoop + ConversationState）
+9. 双通道记忆检索（LivingGraph 扩散激活 + 传统 TopK）
+10. PromptEvolution 指南注入
+11. 系统提示词构建
+12. LLM 深思（~1s）+ 流式提前返回
+13. 元认知置信度评估 + 策略选择
+14. 安全治理检查
+15. 缓存 + 记忆 + 学习 + 图谱 + 规则 + 反馈全面更新
 
 **LLM 集成**：
 - 使用 Anthropic API（通过代理地址 `token-plan-cn.xiaomimimo.com`）
 - 模型：`mimo-v2.5-pro`
-- 15 秒超时，超时自动回退到规则引擎
+- 5 秒超时，超时自动回退到规则引擎
 - 规则引擎支持中英文关键词 → 动作映射
 
 ### 4. 认知记忆引擎
@@ -206,27 +210,40 @@ salience = importance × freshness × (1 + frequency)
 
 **触发方式**：定时触发 / 阈值触发 / 手动触发
 
-### 9. LoRA 微调训练
+### 9. CogRec 神经符号混合
 
-`LoRATrainer` 实现程序性知识沉淀：
+`CogRec` 实现 LLM 教规则引擎的混合架构（灵感来自 arXiv:2512.24113）：
 
-**数据收集**（`DataCollector`）：
-- 从记忆引擎收集程序性记忆和成功案例
-- 从执行日志文件收集训练样本
-- 手动添加训练样本
-- 导出为 JSONL 格式
+- LLM 成功决策自动提取为规则引擎规则
+- 规则随时间累积，LLM 调用比例逐步降低
+- 纠正规则获得最高置信度（0.95）
+- 子串匹配 + 动作可用性过滤
 
-**训练**（`LoRATrainer`）：
-- 基础模型：Qwen2-0.5B
-- LoRA 参数：r=8, alpha=16, dropout=0.05
-- 目标模块：q_proj, v_proj
-- 使用 SFTTrainer 训练
+### 10. ActionMemory 记录-重放
 
-**推理**（`LoRAInference`）：
-- 加载基础模型 + LoRA 适配器
-- 快速动作分类（<10ms on GPU）
+`ActionMemory` 记录完整决策轨迹（灵感来自 MOBIMEM, arXiv:2512.15784）：
 
-### 10. MCP 技能服务器
+- 相似查询直接重放（<1ms）绕过 LLM
+- LLM 评估模糊匹配是否适合重放
+- 完整轨迹记录：输入→决策→结果
+
+### 11. PromptEvolution 双流进化
+
+`PromptEvolution` 实现提示词的自进化（灵感来自 SCOPE, arXiv:2512.15374）：
+
+- **战术流**：短期纠正，成功 N 次后自动过期
+- **战略流**：长期原则，永不过期
+- 相关性匹配注入到决策提示词
+
+### 12. SafetyGovernance 安全治理
+
+`SafetyGovernance` 实现 LLM 驱动的运行时安全（灵感来自 VIGIL, arXiv:2512.07094）：
+
+- 唯一硬约束：`emergency_stop` 始终允许
+- 所有其他安全判断上下文感知（通过 LLM）
+- 违规记录 + 设备状态更新
+
+### 13. MCP 技能服务器
 
 `SkillMCPServer` 实现 MCP（Model Context Protocol）JSON-RPC 服务器：
 
