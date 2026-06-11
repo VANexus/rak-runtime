@@ -157,13 +157,10 @@ class PolicyModel:
         # 加载预训练模型
         if model_path and os.path.exists(model_path):
             self._load_model(model_path)
-            logger.info(f"[PolicyModel] 加载模型: {model_path}")
+            logger.info("[PolicyModel] 加载模型: %s", model_path)
         else:
-            logger.info(f"[PolicyModel] 初始化: "
-                        f"actions={action_space.size}, "
-                        f"features={feature_dim}, "
-                        f"lr={learning_rate}, "
-                        f"ε={exploration_rate}")
+            logger.info("[PolicyModel] 初始化: actions=%s, features=%s, lr=%s, ε=%s",
+                        action_space.size, feature_dim, learning_rate, exploration_rate)
 
     def _init_weights(self, rows: int, cols: int) -> List[List[float]]:
         """Xavier 初始化"""
@@ -269,8 +266,8 @@ class PolicyModel:
             # 更新偏置
             self.bias[i] += self.learning_rate * grad
 
-        logger.debug(f"[PolicyModel] 更新: action={action_id}, "
-                    f"reward={reward:.3f}, advantage={advantage:.3f}")
+        logger.debug("[PolicyModel] 更新: action=%s, reward=%.3f, advantage=%.3f",
+                    action_id, reward, advantage)
 
     def store_experience(self, state: StateVector, action_id: int,
                          reward: float, next_state: Optional[StateVector] = None):
@@ -292,7 +289,7 @@ class PolicyModel:
         if not self.experience_buffer:
             return
 
-        logger.info(f"[PolicyModel] 批量更新: {len(self.experience_buffer)} 条经验")
+        logger.info("[PolicyModel] 批量更新: %s 条经验", len(self.experience_buffer))
 
         for exp in self.experience_buffer:
             self.update(exp["state"], exp["action_id"], exp["reward"])
@@ -320,7 +317,7 @@ class PolicyModel:
         with open(save_path, "w") as f:
             json.dump(model_data, f, indent=2)
 
-        logger.info(f"[PolicyModel] 模型已保存: {save_path}")
+        logger.info("[PolicyModel] 模型已保存: %s", save_path)
 
     def _load_model(self, path: str):
         """加载模型"""
@@ -333,7 +330,7 @@ class PolicyModel:
             self.total_decisions = data.get("total_decisions", 0)
             self.total_updates = data.get("total_updates", 0)
         except Exception as e:
-            logger.warning(f"[PolicyModel] 模型加载失败: {e}")
+            logger.warning("[PolicyModel] 模型加载失败: %s", e)
 
     def stats(self) -> Dict:
         """返回统计信息"""

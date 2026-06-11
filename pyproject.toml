@@ -1,24 +1,34 @@
 [project]
 name = "rak-runtime"
-version = "0.2.0"
+version = "0.3.0"
 requires-python = ">=3.11"
 dependencies = [
-    "openai-whisper==20240930",
-    "paho-mqtt==1.6.1",
-    "soundcard==0.4.6",
-    "numpy==1.24.4",
-    "torch==2.4.1",
-    "grpcio==1.60.0",
-    "grpcio-tools==1.60.0",
-    "protobuf==4.25.9",
-    "sounddevice==0.5.0",
+    # gRPC 通信
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "protobuf>=4.25.0",
 
-    # LLM 决策引擎
+    # LLM 决策引擎（外部 API）
     "anthropic>=0.52.0",
 
-    # PersonaPlex 客户端
-    "websockets==12.0"
+    # MQTT 通信
+    "paho-mqtt>=1.6.1",
+
+    # PersonaPlex 远程 ASR（WebSocket）
+    "websockets>=12.0",
+
+    # 提示词模板
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+
+    # 持久化存储
+    # 可选：psycopg2-binary（PostgreSQL）、redis（Redis）
+    # 安装方式：uv pip install psycopg2-binary redis
 ]
 
-[tool.uv.extra-build-dependencies]
-openai-whisper = ["setuptools"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

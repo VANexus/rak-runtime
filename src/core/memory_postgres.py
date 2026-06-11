@@ -63,7 +63,7 @@ class PostgresMemoryBackend:
                 cur.execute("SELECT 1")
                 cur.close()
                 self._available = True
-                logger.info(f"[PostgresBackend] 连接成功")
+                logger.info("[PostgresBackend] 连接成功")
 
                 # 初始化表结构
                 self._init_schema(conn)
@@ -74,7 +74,7 @@ class PostgresMemoryBackend:
             logger.warning("[PostgresBackend] psycopg2 未安装，回退到 SQLite")
             self._available = False
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 连接失败: {e}，回退到 SQLite")
+            logger.warning("[PostgresBackend] 连接失败: %s，回退到 SQLite", e)
             self._available = False
 
     @property
@@ -191,7 +191,7 @@ class PostgresMemoryBackend:
             logger.info("[PostgresBackend] Schema 初始化完成")
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] Schema 初始化失败: {e}")
+            logger.warning("[PostgresBackend] Schema 初始化失败: %s", e)
             conn.rollback()
 
     def _get_conn(self):
@@ -253,7 +253,7 @@ class PostgresMemoryBackend:
             cur.close()
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 保存失败: {e}")
+            logger.warning("[PostgresBackend] 保存失败: %s", e)
             conn.rollback()
         finally:
             self._put_conn(conn)
@@ -294,7 +294,7 @@ class PostgresMemoryBackend:
             ]
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 加载失败: {e}")
+            logger.warning("[PostgresBackend] 加载失败: %s", e)
             return []
         finally:
             self._put_conn(conn)
@@ -351,7 +351,7 @@ class PostgresMemoryBackend:
             ]
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 向量检索失败: {e}")
+            logger.warning("[PostgresBackend] 向量检索失败: %s", e)
             return []
         finally:
             self._put_conn(conn)
@@ -393,7 +393,7 @@ class PostgresMemoryBackend:
             ]
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 全文搜索失败: {e}")
+            logger.warning("[PostgresBackend] 全文搜索失败: %s", e)
             return []
         finally:
             self._put_conn(conn)
@@ -414,7 +414,7 @@ class PostgresMemoryBackend:
             conn.commit()
             cur.close()
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 更新访问失败: {e}")
+            logger.warning("[PostgresBackend] 更新访问失败: %s", e)
             conn.rollback()
         finally:
             self._put_conn(conn)
@@ -437,11 +437,11 @@ class PostgresMemoryBackend:
             cur.close()
 
             if deleted > 0:
-                logger.info(f"[PostgresBackend] 修剪 {deleted} 条低显著性记忆")
+                logger.info("[PostgresBackend] 修剪 %s 条低显著性记忆", deleted)
             return deleted
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 修剪失败: {e}")
+            logger.warning("[PostgresBackend] 修剪失败: %s", e)
             conn.rollback()
             return 0
         finally:
@@ -465,7 +465,7 @@ class PostgresMemoryBackend:
             conn.commit()
             cur.close()
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 记录执行失败: {e}")
+            logger.warning("[PostgresBackend] 记录执行失败: %s", e)
             conn.rollback()
         finally:
             self._put_conn(conn)
@@ -511,7 +511,7 @@ class PostgresMemoryBackend:
             }
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 统计查询失败: {e}")
+            logger.warning("[PostgresBackend] 统计查询失败: %s", e)
             return {}
         finally:
             self._put_conn(conn)
@@ -533,7 +533,7 @@ class PostgresMemoryBackend:
             conn.commit()
             cur.close()
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 记录权重失败: {e}")
+            logger.warning("[PostgresBackend] 记录权重失败: %s", e)
             conn.rollback()
         finally:
             self._put_conn(conn)
@@ -567,7 +567,7 @@ class PostgresMemoryBackend:
             ]
 
         except Exception as e:
-            logger.warning(f"[PostgresBackend] 权重历史查询失败: {e}")
+            logger.warning("[PostgresBackend] 权重历史查询失败: %s", e)
             return []
         finally:
             self._put_conn(conn)
@@ -635,7 +635,7 @@ class HybridLongTermBackend:
             self._sqlite = SQLiteMemoryBackend(self._sqlite_path)
             logger.info("[HybridLongTerm] 使用 SQLite 降级后端")
         except Exception as e:
-            logger.warning(f"[HybridLongTerm] SQLite 初始化失败: {e}")
+            logger.warning("[HybridLongTerm] SQLite 初始化失败: %s", e)
 
     @property
     def backend_name(self) -> str:

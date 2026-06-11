@@ -1,0 +1,34 @@
+# 单次决策提示词模板
+# 变量：agent_name, available_actions, memory_context, device_state, insights, output_format, decision_rules
+
+system_prompt: |
+  {{ persona }}
+
+  ## 可用动作
+  {% for action in available_actions %}
+  - {{ action }}
+  {% endfor %}
+
+  {% if memory_context %}
+  {{ memory_context }}
+  {% endif %}
+
+  {% if device_state %}
+  ## 当前设备状态
+  {{ device_state }}
+  {% endif %}
+
+  {% if insights %}
+  ## 经验教训
+  {% for insight in insights %}
+  - {{ insight }}
+  {% endfor %}
+  {% endif %}
+
+  ## 输出格式
+  {{ output_format }}
+
+  ## 规则
+  {% for rule in decision_rules %}
+  {{ loop.index }}. {{ rule }}
+  {% endfor %}

@@ -116,12 +116,11 @@ class AgenticRAG:
             max_steps=self.max_steps,
         )
 
-        logger.info(f"[AgenticRAG] 开始查询: '{question}' (max_steps={self.max_steps})")
+        logger.info("[AgenticRAG] 开始查询: '%s' (max_steps=%s)", question, self.max_steps)
 
         while state.step < self.max_steps:
             state.step += 1
-            logger.info(f"[AgenticRAG] 步骤 {state.step}/{self.max_steps}: "
-                        f"查询='{state.current_query}'")
+            logger.info("[AgenticRAG] 步骤 %s/%s: 查询='%s'", state.step, self.max_steps, state.current_query)
 
             # 1. RETRIEVE
             retrieval_results = self._retrieve(state.current_query, top_k)
@@ -136,8 +135,8 @@ class AgenticRAG:
                 "top_similarity": retrieval_results[0].similarity if retrieval_results else 0,
             })
 
-            logger.info(f"[AgenticRAG] 检索到 {len(retrieval_results)} 条结果, "
-                        f"累积证据 {len(state.accumulated_evidence)} 条")
+            logger.info("[AgenticRAG] 检索到 %d 条结果, 累积证据 %d 条",
+                        len(retrieval_results), len(state.accumulated_evidence))
 
             # 2. REASON — 判断证据是否充分
             reasoning_result = self.reason_fn(question, state.accumulated_evidence)
@@ -161,7 +160,7 @@ class AgenticRAG:
                     "reason": "证据充分",
                     "confidence": state.confidence,
                 })
-                logger.info(f"[AgenticRAG] 证据充分，停止 (confidence={state.confidence:.2f})")
+                logger.info("[AgenticRAG] 证据充分，停止 (confidence=%.2f)", state.confidence)
                 break
 
             # 4. REFINE — 生成更精确的子查询
@@ -173,7 +172,7 @@ class AgenticRAG:
                     "action": ReasoningStep.REFINE.value,
                     "new_query": refined_query,
                 })
-                logger.info(f"[AgenticRAG] 精化查询: '{refined_query}'")
+                logger.info("[AgenticRAG] 精化查询: '%s'", refined_query)
             else:
                 # 没有更精确的查询，尝试分解问题
                 sub_queries = self._decompose_query(question, state.accumulated_evidence)
@@ -212,10 +211,8 @@ class AgenticRAG:
             elapsed_ms=elapsed_ms,
         )
 
-        logger.info(f"[AgenticRAG] 完成: {state.step} 步, "
-                    f"{result.total_retrievals} 次检索, "
-                    f"confidence={state.confidence:.2f}, "
-                    f"耗时={elapsed_ms:.0f}ms")
+        logger.info("[AgenticRAG] 完成: %d 步, %d 次检索, confidence=%.2f, 耗时=%.0fms",
+                    state.step, result.total_retrievals, state.confidence, elapsed_ms)
 
         return result
 
@@ -225,7 +222,7 @@ class AgenticRAG:
             results = self.retrieve_fn(query, top_k)
             return results if results else []
         except Exception as e:
-            logger.warning(f"[AgenticRAG] 检索失败: {e}")
+            logger.warning("[AgenticRAG] 检索失败: %s", e)
             return []
 
     def _default_reason(self, query: str, evidence: List[str]) -> Dict:
@@ -375,7 +372,7 @@ class AgenticRAGWithLLM(AgenticRAG):
             }
 
         except Exception as e:
-            logger.warning(f"[AgenticRAG] LLM 推理失败: {e}，降级到规则引擎")
+            logger.warning("[AgenticRAG] LLM 推理失败: %s，降级到规则引擎", e)
             return self._default_reason(query, evidence)
 
     def _synthesize(self, query: str, evidence: List[str]) -> str:
@@ -400,6 +397,6 @@ class AgenticRAGWithLLM(AgenticRAG):
                     return block.text.strip()
 
         except Exception as e:
-            logger.warning(f"[AgenticRAG] LLM 综合失败: {e}")
+            logger.warning("[AgenticRAG] LLM 综合失败: %s", e)
 
         return super()._synthesize(query, evidence)

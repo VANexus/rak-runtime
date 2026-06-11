@@ -91,7 +91,7 @@ class SleepConsolidation:
         start_time = time.time()
         self.total_cycles += 1
 
-        logger.info(f"[SleepConsolidation] === 第 {self.total_cycles} 轮整合开始 ===")
+        logger.info("[SleepConsolidation] === 第 %s 轮整合开始 ===", self.total_cycles)
 
         stats = {
             "consolidated": 0,
@@ -132,10 +132,8 @@ class SleepConsolidation:
 
         self.history.append(result)
 
-        logger.info(f"[SleepConsolidation] === 整合完成: "
-                    f"迁移={consolidated}, 遗忘={pruned}, "
-                    f"反思={reflections}, 压缩={compressions}, "
-                    f"耗时={elapsed_ms:.0f}ms ===")
+        logger.info("[SleepConsolidation] === 整合完成: 迁移=%d, 遗忘=%d, 反思=%d, 压缩=%d, 耗时=%.0fms ===",
+                    consolidated, pruned, reflections, compressions, elapsed_ms)
 
         return result
 
@@ -164,12 +162,11 @@ class SleepConsolidation:
                 self.memory_engine.long_term.add(entry)
                 consolidated += 1
 
-                logger.debug(f"[SleepConsolidation] 迁移: {entry.id} "
-                           f"(salience={entry.salience:.3f})")
+                logger.debug("[SleepConsolidation] 迁移: %s (salience=%.3f)", entry.id, entry.salience)
 
         # 从短期记忆中移除已迁移的
         if consolidated > 0:
-            logger.info(f"[SleepConsolidation] 迁移 {consolidated} 条记忆到长期存储")
+            logger.info("[SleepConsolidation] 迁移 %s 条记忆到长期存储", consolidated)
 
         return consolidated
 
@@ -202,7 +199,7 @@ class SleepConsolidation:
             pruned += 1
 
         if pruned > 0:
-            logger.info(f"[SleepConsolidation] 遗忘 {pruned} 条低显著性记忆")
+            logger.info("[SleepConsolidation] 遗忘 %s 条低显著性记忆", pruned)
 
         # 也修剪持久化存储
         if self.persistence:
@@ -237,7 +234,7 @@ class SleepConsolidation:
                     "timestamp": time.time(),
                 })
 
-            logger.info(f"[SleepConsolidation] 生成反思: {reflection.id}")
+            logger.info("[SleepConsolidation] 生成反思: %s", reflection.id)
 
         # 使用 LLM 生成更深入的反思（如果可用）
         if self.llm_client and self.memory_engine.reflection.execution_log:
@@ -298,7 +295,7 @@ class SleepConsolidation:
                 )
 
         except Exception as e:
-            logger.warning(f"[SleepConsolidation] LLM 反思失败: {e}")
+            logger.warning("[SleepConsolidation] LLM 反思失败: %s", e)
 
         return None
 
@@ -348,7 +345,7 @@ class SleepConsolidation:
                         compressed += 1
 
         if compressed > 0:
-            logger.info(f"[SleepConsolidation] 压缩 {compressed} 条重复记忆")
+            logger.info("[SleepConsolidation] 压缩 %s 条重复记忆", compressed)
 
         return compressed
 
@@ -404,7 +401,7 @@ class SleepConsolidation:
             logger.debug("[SleepConsolidation] 状态已持久化")
 
         except Exception as e:
-            logger.warning(f"[SleepConsolidation] 持久化失败: {e}")
+            logger.warning("[SleepConsolidation] 持久化失败: %s", e)
 
     def restore_state(self):
         """从持久化存储恢复记忆状态"""
@@ -449,12 +446,11 @@ class SleepConsolidation:
                 )
                 self.memory_engine.long_term.add(entry)
 
-            logger.info(f"[SleepConsolidation] 恢复完成: "
-                        f"短期={len(short_term_data)}条, "
-                        f"长期={len(long_term_data)}条")
+            logger.info("[SleepConsolidation] 恢复完成: 短期=%d条, 长期=%d条",
+                        len(short_term_data), len(long_term_data))
 
         except Exception as e:
-            logger.warning(f"[SleepConsolidation] 恢复失败: {e}")
+            logger.warning("[SleepConsolidation] 恢复失败: %s", e)
 
     def stats(self) -> Dict:
         """返回统计"""

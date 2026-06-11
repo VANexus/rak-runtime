@@ -48,12 +48,12 @@ class RedisMemoryBackend:
             self._client = redis.from_url(self.redis_url, decode_responses=True)
             self._client.ping()
             self._available = True
-            logger.info(f"[RedisBackend] 连接成功: {self.redis_url}")
+            logger.info("[RedisBackend] 连接成功: %s", self.redis_url)
         except ImportError:
             logger.warning("[RedisBackend] redis-py 未安装，回退到文件后端")
             self._available = False
         except Exception as e:
-            logger.warning(f"[RedisBackend] 连接失败: {e}，回退到文件后端")
+            logger.warning("[RedisBackend] 连接失败: %s，回退到文件后端", e)
             self._available = False
 
     @property
@@ -88,11 +88,11 @@ class RedisMemoryBackend:
                 {entry_id: time.time()},
             )
 
-            logger.debug(f"[RedisBackend] 保存: {entry_id} (TTL={ttl}s)")
+            logger.debug("[RedisBackend] 保存: %s (TTL=%ss)", entry_id, ttl)
             return True
 
         except Exception as e:
-            logger.warning(f"[RedisBackend] 保存失败: {e}")
+            logger.warning("[RedisBackend] 保存失败: %s", e)
             return False
 
     def load_memory(self, entry_id: str) -> Optional[Dict]:
@@ -106,7 +106,7 @@ class RedisMemoryBackend:
                 return json.loads(data)
             return None
         except Exception as e:
-            logger.warning(f"[RedisBackend] 加载失败: {e}")
+            logger.warning("[RedisBackend] 加载失败: %s", e)
             return None
 
     def load_all_memories(self, limit: int = 100) -> List[Dict]:
@@ -129,7 +129,7 @@ class RedisMemoryBackend:
             return memories
 
         except Exception as e:
-            logger.warning(f"[RedisBackend] 批量加载失败: {e}")
+            logger.warning("[RedisBackend] 批量加载失败: %s", e)
             return []
 
     def delete_memory(self, entry_id: str) -> bool:
@@ -142,7 +142,7 @@ class RedisMemoryBackend:
             self._client.zrem(self._key("short", "index"), entry_id)
             return True
         except Exception as e:
-            logger.warning(f"[RedisBackend] 删除失败: {e}")
+            logger.warning("[RedisBackend] 删除失败: %s", e)
             return False
 
     def count_memories(self) -> int:
@@ -167,7 +167,7 @@ class RedisMemoryBackend:
             self._client.lpush(key, json.dumps(entry, ensure_ascii=False))
             self._client.ltrim(key, 0, max_items-1)
         except Exception as e:
-            logger.warning(f"[RedisBackend] 工作记忆写入失败: {e}")
+            logger.warning("[RedisBackend] 工作记忆写入失败: %s", e)
 
     def get_working_memory(self, limit: int = 10) -> List[Dict]:
         """获取工作记忆"""
@@ -178,7 +178,7 @@ class RedisMemoryBackend:
             items = self._client.lrange(self._key("working"), 0, limit-1)
             return [json.loads(item) for item in items]
         except Exception as e:
-            logger.warning(f"[RedisBackend] 工作记忆读取失败: {e}")
+            logger.warning("[RedisBackend] 工作记忆读取失败: %s", e)
             return []
 
     # ========== 执行日志 ==========
@@ -193,7 +193,7 @@ class RedisMemoryBackend:
             self._client.lpush(key, json.dumps(entry, ensure_ascii=False))
             self._client.ltrim(key, 0, max_logs-1)
         except Exception as e:
-            logger.warning(f"[RedisBackend] 执行日志写入失败: {e}")
+            logger.warning("[RedisBackend] 执行日志写入失败: %s", e)
 
     def get_execution_log(self, last_n: int = 100) -> List[Dict]:
         """获取最近的执行日志"""
@@ -204,7 +204,7 @@ class RedisMemoryBackend:
             items = self._client.lrange(self._key("exec_log"), 0, last_n-1)
             return [json.loads(item) for item in items]
         except Exception as e:
-            logger.warning(f"[RedisBackend] 执行日志读取失败: {e}")
+            logger.warning("[RedisBackend] 执行日志读取失败: %s", e)
             return []
 
     # ========== 统计 ==========
@@ -253,10 +253,10 @@ class RedisMemoryBackend:
                     removed += 1
 
             if removed > 0:
-                logger.info(f"[RedisBackend] 清理 {removed} 个过期索引")
+                logger.info("[RedisBackend] 清理 %s 个过期索引", removed)
 
         except Exception as e:
-            logger.warning(f"[RedisBackend] 清理失败: {e}")
+            logger.warning("[RedisBackend] 清理失败: %s", e)
 
     def flush_all(self):
         """清空所有记忆（危险操作）"""
@@ -267,9 +267,9 @@ class RedisMemoryBackend:
             keys = self._client.keys(self.key_prefix + "*")
             if keys:
                 self._client.delete(*keys)
-                logger.warning(f"[RedisBackend] 清空 {len(keys)} 个键")
+                logger.warning("[RedisBackend] 清空 %s 个键", len(keys))
         except Exception as e:
-            logger.warning(f"[RedisBackend] 清空失败: {e}")
+            logger.warning("[RedisBackend] 清空失败: %s", e)
 
 
 class HybridMemoryBackend:

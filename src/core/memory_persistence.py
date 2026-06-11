@@ -46,9 +46,9 @@ class FileMemoryBackend:
         try:
             with open(self.short_term_path, "w") as f:
                 json.dump(memories, f, ensure_ascii=False, indent=2)
-            logger.debug(f"[FileBackend] 保存 {len(memories)} 条短期记忆")
+            logger.debug("[FileBackend] 保存 %s 条短期记忆", len(memories))
         except Exception as e:
-            logger.warning(f"[FileBackend] 保存短期记忆失败: {e}")
+            logger.warning("[FileBackend] 保存短期记忆失败: %s", e)
 
     def load_short_term_memories(self) -> List[Dict]:
         """加载短期记忆"""
@@ -58,7 +58,7 @@ class FileMemoryBackend:
             with open(self.short_term_path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning(f"[FileBackend] 加载短期记忆失败: {e}")
+            logger.warning("[FileBackend] 加载短期记忆失败: %s", e)
             return []
 
     def append_execution_log(self, entry: Dict):
@@ -67,7 +67,7 @@ class FileMemoryBackend:
             with open(self.execution_log_path, "a") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.warning(f"[FileBackend] 写入执行日志失败: {e}")
+            logger.warning("[FileBackend] 写入执行日志失败: %s", e)
 
     def read_execution_log(self, last_n: int = 100) -> List[Dict]:
         """读取最近 N 条执行日志"""
@@ -83,7 +83,7 @@ class FileMemoryBackend:
                     entries.append(json.loads(line))
             return entries
         except Exception as e:
-            logger.warning(f"[FileBackend] 读取执行日志失败: {e}")
+            logger.warning("[FileBackend] 读取执行日志失败: %s", e)
             return []
 
     def append_reflection(self, entry: Dict):
@@ -92,7 +92,7 @@ class FileMemoryBackend:
             with open(self.reflection_log_path, "a") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.warning(f"[FileBackend] 写入反思日志失败: {e}")
+            logger.warning("[FileBackend] 写入反思日志失败: %s", e)
 
 
 class SQLiteMemoryBackend:
@@ -151,7 +151,7 @@ class SQLiteMemoryBackend:
                 CREATE INDEX IF NOT EXISTS idx_exec_time ON execution_stats(timestamp DESC);
             """)
             conn.commit()
-            logger.info(f"[SQLiteBackend] 数据库初始化完成: {self.db_path}")
+            logger.info("[SQLiteBackend] 数据库初始化完成: %s", self.db_path)
         finally:
             conn.close()
 
@@ -280,7 +280,7 @@ class SQLiteMemoryBackend:
             conn.commit()
 
             if deleted > 0:
-                logger.info(f"[SQLiteBackend] 修剪 {deleted} 条低显著性记忆")
+                logger.info("[SQLiteBackend] 修剪 %s 条低显著性记忆", deleted)
 
             return deleted
         finally:
@@ -374,7 +374,7 @@ class PersistentMemoryManager:
         self.sqlite_backend = SQLiteMemoryBackend(
             os.path.join(data_dir, "long_term.db")
         )
-        logger.info(f"[PersistentMemory] 初始化: data_dir={data_dir}")
+        logger.info("[PersistentMemory] 初始化: data_dir=%s", data_dir)
 
     def save_short_term(self, memories: List[Dict]):
         """保存短期记忆"""
