@@ -21,4 +21,4 @@ dependencies = [
 ]
 
 [tool.uv.extra-build-dependencies]
-openai-whisper = ["setuptools"]
+openai-whisper = ["setuptools<60.0.0", "wheel"]

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python期末作业-聊天机器人</title>
+    <style>
+        .container { max-width: 600px; margin: 50px auto; }
+        #messages { height: 400px; border: 1px solid #ccc; padding: 10px; overflow-y: auto; margin-bottom: 10px; }
+        .message { margin: 5px 0; padding: 8px; border-radius: 5px; }
+        .user { background: #e3f2fd; text-align: right; }
+        .bot { background: #f5f5f5; }
+        .input-area { display: flex; gap: 10px; }
+        #input { flex: 1; padding: 8px; }
+        button { padding: 8px 16px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>智能聊天机器人</h1>
+        <div id="messages"></div>
+        <div class="input-area">
+            <input type="text" id="input" placeholder="输入指令...">
+            <button onclick="send()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        function addMessage(text, isUser) {
+            const div = document.createElement('div');
+            div.className = `message ${isUser ? 'user' : 'bot'}`;
+            div.textContent = text;
+            document.getElementById('messages').appendChild(div);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+
+        async function send() {
+            const input = document.getElementById('input');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            addMessage(text, true);
+            input.value = '';
+            
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: text})
+            });
+            
+            const data = await res.json();
+            addMessage(data.reply, false);
+        }
+
+        document.getElementById('input').addEventListener('keypress', e => e.key === 'Enter' && send());
+        addMessage('你好！试试说：开门、挥手、前进然后左转', false);
+    </script>
+</body>
+</html>
