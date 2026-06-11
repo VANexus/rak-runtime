@@ -35,6 +35,7 @@ class Rule:
     hit_count: int = 0     # 命中次数
     success_count: int = 0 # 成功次数
     source: str = "llm"    # 来源：llm / correction / manual
+    answer: str = ""       # 自然语言回复
 
     def success_rate(self) -> float:
         if self.hit_count == 0:
@@ -51,6 +52,7 @@ class Rule:
             "success_count": self.success_count,
             "source": self.source,
             "created_at": self.created_at,
+            "answer": self.answer,
         }
 
     @classmethod
@@ -64,6 +66,7 @@ class Rule:
             success_count=data.get("success_count", 0),
             source=data.get("source", "llm"),
             created_at=data.get("created_at", time.time()),
+            answer=data.get("answer", ""),
         )
 
 
@@ -117,6 +120,7 @@ class CogRecEngine:
                     "params_json": rule.params_json,
                     "confidence": rule.confidence,
                     "source": "cogrec_exact",
+                    "answer": rule.answer,
                 }
 
         # 子串匹配（最长匹配优先）
@@ -139,12 +143,14 @@ class CogRecEngine:
                 "params_json": best_match.params_json,
                 "confidence": best_match.confidence,
                 "source": "cogrec_substring",
+                "answer": best_match.answer,
             }
 
         return None
 
     def learn_from_success(self, query: str, action: str,
-                           params_json: str = "{}", confidence: float = 0.7):
+                           params_json: str = "{}", confidence: float = 0.7,
+                           answer: str = ""):
         """
         从成功的 LLM 决策中提取规则。
 
@@ -170,6 +176,7 @@ class CogRecEngine:
                 confidence=confidence,
                 success_count=1,
                 source="llm",
+                answer=answer,
             )
             self._rules[query_lower] = rule
             self._rules_learned += 1

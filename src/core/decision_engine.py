@@ -935,7 +935,8 @@ class DecisionEngine:
 
             # CogRec: 从 LLM 成功中学习规则
             if cog_rec and query and chosen:
-                cog_rec.learn_from_success(query, chosen, llm_result.get("params_json", "{}"))
+                cog_rec.learn_from_success(query, chosen, llm_result.get("params_json", "{}"),
+                                          answer=llm_result.get("answer", ""))
 
             # ActionMemory: 记录成功轨迹
             if action_mem and query and chosen:
