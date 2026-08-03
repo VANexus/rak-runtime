@@ -9,3 +9,6 @@ mqtt-data/
 data/
 .remember/
 .pytest_cache/
+
+# macOS 资源叉（AppleDouble）— 避免 git status 出现几千个 ._* 资源叉污染
+._*
