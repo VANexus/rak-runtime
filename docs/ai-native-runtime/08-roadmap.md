@@ -33,6 +33,10 @@
 | G24 | 进化 | 技能/PolicyModel/元认知权重不落盘 | 07 |
 | G25 | 进化 | 工具轨迹未进学习闭环 | 07 |
 | G26 | 进化 | 无深度自省（学习整合） | 07 |
+| G27 | 记忆 | 记忆写入无幂等（content-hash 去重）与全文索引（FTS5） | 03（claude-mem） |
+| G28 | 记忆 | 记忆摄入无隐私护栏（敏感标签/排除清单） | 03（claude-mem） |
+| G29 | 工具 | 工具无目录查询（tool list/search/preflight），agent 无法按需发现 | 02（CLI-Anything） |
+| G30 | 工具 | 原子动作无能力矩阵编排（目标 × 动作序列 + preflight 检查设备） | 02（CLI-Anything） |
 
 ## 实施路线（分阶段）
 
@@ -48,24 +52,27 @@
 
 **验证**：工具轨迹可见（`get_cognitive_stats` 含轨迹）；权限门拦截动作工具；钩子驱动学习。
 
-### Phase B：工具统一（G5-G7）
+### Phase B：工具统一（G5-G7，G29）
 
 6. `src/tools/registry.py`：ToolDef + 从 registry 生成 LangGraph/FastMCP/A2A 三形态
-7. 工具返回封装（token 预算 + summary）
+7. 工具返回封装（token 预算 + summary + 结构化错误码，对齐 CLI-Anything exit-code 语义）
 8. `src/core/mcp_client.py`：大脑连接外部 MCP 服务器（硬件驱动可扩展）
+9. **工具目录查询（G29）**：MCP 暴露 `tool list/search/preflight`，agent 按需发现而非全量暴露
 
-**验证**：加一个能力只改 registry 一处；三协议自动同步；MCP 客户端拉入外部工具成功。
+**验证**：加一个能力只改 registry 一处；三协议自动同步；MCP 客户端拉入外部工具成功；tool preflight 报缺口。
 
-### Phase C：记忆与技能（G8-G13）
+### Phase C：记忆与技能（G8-G13，G27-G28）
 
 9. 记忆渐进披露（L1 索引 + search_memory(full=True)）
 10. 结构化笔记（`notebooks/`）+ 会话注入
 11. 记忆效用闭环 + scope 隔离
-12. `skills/` 目录 + SKILL.md + load_skill 工具 + 学习闭环自动沉淀
+12. **记忆写入幂等 + FTS5 全文索引（G27）**：sha256 content-hash 去重，narrative 挂免费全文检索
+13. **记忆摄入隐私护栏（G28）**：敏感标签剥离 + 排除清单 + 校验器（对齐 claude-mem PrivacyCheckValidator）
+14. `skills/` 目录 + SKILL.md + load_skill 工具 + 学习闭环自动沉淀
 
-**验证**：记忆注入 token 大幅下降；跨会话笔记生效；技能自动沉淀可复用。
+**验证**：记忆注入 token 大幅下降；跨会话笔记生效；重复写入不产生重复条目；隐私内容被过滤；技能自动沉淀可复用。
 
-### Phase D：协议与具身（G14-G22）
+### Phase D：协议与具身（G14-G22，G30）
 
 13. 统一出站路由（outbound_hub）+ 回执喂 WorldModel/反射弧
 14. 入站 Task 归一化（gRPC/A2A/MCP 共用决策路径）
@@ -74,8 +81,9 @@
 17. 世界模型预测注入决策 + 异常阻断
 18. 主动性 LLM 判断层 + 情绪→权限门联动
 19. body_budget（能耗/频率/健康度）
+20. **设备动作能力矩阵（G30）**：14 个原子动作建模为"目标 × 动作序列"矩阵，preflight 检查设备在位
 
-**验证**：出站回执闭环；异常阻断真实触发；情绪高压力时动作 ask。
+**验证**：出站回执闭环；异常阻断真实触发；情绪高压力时动作 ask；动作矩阵 preflight 报缺口。
 
 ### Phase E：进化闭环（G23-G26）
 

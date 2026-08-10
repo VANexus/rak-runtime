@@ -84,5 +84,16 @@ TOOL_DEFS = {
 
 ## 竞品借鉴
 
-> ⏳ 待竞品分析返回后补充：CodeWhale 的 extensions/integrations 机制、CLI-Anything 的插件发现与隔离、
-> openclaw 的 skills 注册体系、Claude Code 的 MCP client 工具注入。
+### CLI-Anything（插件化 CLI agent 框架，HKUDS）
+
+直接对治"三形态工具各自为政"与"动作编排"两大问题：
+
+| CLI-Anything 设计 | 移植到 rak-runtime | 对应差距 |
+|---|---|---|
+| **Registry + preflight 工具目录**：`registry.json`（工具 id/描述/requires/entry_point）+ `cli-hub list/search/install` + `preflight --json`（exit 3=缺口） | ToolDef registry 之外再加**目录查询**：MCP 暴露 `tool list/search/preflight`，agent 按需发现而不是全量暴露 14 个工具 | G5 |
+| **Capability 矩阵（跨工具编排）**：把"产出一条视频"建模为 capability × provider 矩阵 | 14 个原子动作建模成"目标 × 动作序列"能力矩阵，preflight 检查设备在位/动作可用 | G19/G20 |
+| **JSON 输出契约 + exit-code 语义**：所有命令可 `--json` 机器消费；退出码 0/1/2/3 分级（0 成功 / 3 前置缺口） | 工具返回统一 `{ok, data, summary, truncated}` + 结构化错误码（对齐 grpc-contracts 的 error_code 语义） | G6 |
+| **"包装真实设备，绝不重实现"**：CLI 只 subprocess 调真实软件，产物由真实软件产出并 E2E 验证 | rak-runtime 动作保持为对 go-kernel/设备的命令转发，不在 Python 侧重实现设备逻辑；工具测试用 E2E 验证真实产物 | G7 |
+| **meta-skill（发现即能力）**：把"发现并安装 CLI"本身做成一个 SKILL.md | 把"发现并启用设备/工具"做成大脑技能（`device_discovery`），agent 任务需要时先查再启用 | G13/G19 |
+
+**不必学的**：CLI-Anything 是纯工具编排（无记忆/无认知/无具身）；其价值是工具层工程（发现/契约/编排），不是架构。

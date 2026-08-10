@@ -74,5 +74,25 @@ rak-runtime 记忆体系已相当完整：
 
 ## 竞品借鉴
 
-> ⏳ 待竞品分析返回后补充：claude-mem 的观察采集/注入机制、Codex 的会话上下文管理、
-> openclaw 的持久状态设计。rak-runtime 已有的（扩散激活/联想流/AgenticRAG）对比后标注。
+### claude-mem（记忆压缩系统，TypeScript/Bun）
+
+核心结论：claude-mem 对 rak-runtime 的价值是 **LivingGraph 之下的"持久 capture→compress→inject 底座"**——它不做扩散激活/情绪驱动联想（那正是我们领先的），但它在**写入路径**上有我们缺的工程深度：
+
+| claude-mem 设计 | 移植到 rak-runtime | 对应差距 |
+|---|---|---|
+| **Observer-agent 压缩环**：每次工具调用被独立 agent 压成类型化 observation（XML：facts/concepts/narrative/files），写时便宜、读时省 token | 给 MemoryStream/sleep_consolidation 一个具体 schema + 批次队列：把动作/传感器事件压成类型化 observation + 每会话 summary | G8/G9 |
+| **Pending-queue + claim-iterate worker**：hooks fire-and-forget 异步入 SQLite `pending_messages`，worker 的 agent claim→处理→clear，崩溃 `resetProcessingToPending` | 记忆写入走队列（不阻塞决策），崩溃可恢复——比当前"决策时同步写记忆"更健壮 | G8 |
+| **双 session 身份 + NULL 门控写入**：observation 在 observer 的 `memory_session_id` 登记前不落库；`content_session_id` 只是查找键 | 记忆条目带来源 session 门控，杜绝跨会话污染 | G11 |
+| **ContextBuilder 预算化注入**：observation+summary 交错时间线，只 top-N 给全文，header 打 token 经济学（tokens_injected/tokens_saved） | 替换 `_build_memory_context` 的拼串为"时间线 + top-N 全文 + 预算标记" | G8 |
+| **content-hash 幂等 + SQLite FTS5**：sha256 去重 `ON CONFLICT DO NOTHING`，触发器维护全文索引 | LivingGraph 节点/边加 sha256 去重；narrative 挂 FTS5 关键词检索（补充 pgvector） | G10 |
+| **写路径隐私护栏**：`<private>` 标签剥离、skip-tools、excluded-projects、PrivacyCheckValidator | safety_governance 在记忆摄入点加等价的隐私过滤 | 新增 |
+| **Outbox 式同步（"database is the queue"）** | go-kernel↔rak-runtime 边界与多设备记忆同步的干净模式 | G16 |
+
+**不必学的**：claude-mem 只有单层 observation/summary（我们的三层记忆更薄更全）；它是被动摘要式（无扩散激活/情绪联想——我们领先项，别为对齐砍掉）。
+
+### CLI-Anything（插件化 CLI agent 框架，Python/HKUDS）
+
+对 rak-runtime 的启示在**工具发现与设备动作编排**（详见 02/04 章）：
+- 工具 registry + preflight（`registry.json` 目录 + `matrix_registry` 能力矩阵 + `preflight --json` 报缺口）
+- "包装真实设备"原则（工具转发真实设备命令，不自己重实现设备逻辑）
+- meta-skill（把"发现并启用工具"本身做成 agent 技能）

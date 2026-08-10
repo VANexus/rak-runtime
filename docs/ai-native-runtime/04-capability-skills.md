@@ -64,5 +64,21 @@ skills/
 
 ## 竞品借鉴
 
-> ⏳ 待竞品分析返回后补充：openclaw 的 skills 体系、CLI-Anything 的 meta-skill 与插件发现、
-> claude-code 的 Agent Skills 实现细节。
+### claude-mem（20 个 SKILL.md 技能集）
+
+- 每个能力一个 SKILL.md（frontmatter name+description + 正文），`plugin/skills/` 组织。
+- 技能与工具互补：claude-mem 的 MCP 工具（search/timeline/get_observations）+ 20 个技能（learn-codebase/smart-explore/standup…）。
+- **skills 是"程序性记忆"**：工具给单步能力，技能给多步工作流（含指令 + 脚本 + 参考资源）。
+- 印证本章结论：技能目录是活资产，可随 agent 自主发现、按需加载。
+
+### CLI-Anything（meta-skill 模式）
+
+- `cli-hub-meta-skill` = **一个让 agent 自主发现并安装 CLI 的 SKILL.md**："文档是市场入口"，
+  agent 任务需要时先 `cli-hub search/list` 再按需 `install`（明确禁止 bulk-install）。
+- `cli-hub-matrix/*/SKILL.md`：每个能力矩阵（3d-cad/video-creation…）自带技能，preflight 报缺口再精装。
+- 对 rak-runtime 的直接映射：
+  1. **`device_discovery` 技能**：大脑需要控制新设备时，先查 registry 再启用其 MCP/A2A 能力
+  2. **技能 = 能力目录的入口**：`skills/` 不仅存流程，还存"如何发现更多能力"
+  3. **preflight 式技能检查**：技能加载前先检查前置（设备在位、工具可用、权限放行）
+
+**不必学的**：CLI-Anything 的技能是纯 CLI 编排（无认知/记忆维度）；开源的 skills 标准（agentskills.io）已吸收其渐进披露思想，直接采用标准即可。
