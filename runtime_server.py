@@ -185,6 +185,17 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
             cognitive_state=json.dumps(cognitive, ensure_ascii=False) if cognitive else "",
         )
 
+        # 多动作结果（复合指令分解）→ repeated ActionItem
+        actions = result.get("actions", [])
+        if actions:
+            for a in actions[:10]:
+                response.actions.extend([runtime_pb2.ActionItem(
+                    action=a.get("action", ""),
+                    params_json=a.get("params_json", "{}"),
+                    target_device=a.get("target_device", ""),
+                    priority=a.get("priority", 0),
+                )])
+
         if result.get("status") == "error":
             response.error_code = result.get("error_code", "UNKNOWN")
             response.error_message = result.get("error_message", "")
