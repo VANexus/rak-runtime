@@ -57,6 +57,7 @@ python test_e2e_full.py        # 端到端全链路测试
 ```
 src/core/
 ├── decision_engine.py      # 决策引擎（四层：缓存→元认知→LLM→规则）
+├── agent_loop.py           # Agentic 内核（LangGraph ReAct 工具循环，深思路径）
 ├── prompt_engine.py        # 提示词引擎（动态系统提示词构建）
 ├── semantic_cache.py       # 语义缓存（高频查询 <1ms 返回）
 ├── learning_loop.py        # 学习闭环（执行反馈→经验沉淀→提示词优化）
@@ -68,28 +69,36 @@ src/core/
 ├── need_engine.py          # 需求引擎（基于系统信号的内部驱动力）
 ├── memory_stream.py        # 联想记忆流（随机激活→语义联想→洞察涌现）
 ├── emotion_state.py        # 情绪动力学（六维情绪+事件驱动+衰减）
-├── inner_loop.py           # 内心循环（事件驱动：感知→联想→决策→表达）
+├── inner_loop.py           # 内心循环（事件驱动，线程安全桥接到事件循环）
 ├── conversation_state.py   # 对话状态（话题追踪+发散思考+无缝衔接）
 ├── living_graph.py         # 活体知识图谱（扩散激活+赫布学习+自动建图）
 ├── memory_engine.py        # 三层认知记忆（工作/短期/长期 + 反思）
-├── memory_persistence.py   # SQLite + JSON 持久化
-├── memory_postgres.py      # PostgreSQL 后端（pgvector）
-├── memory_redis.py         # Redis 后端（TTL + Pub/Sub）
+├── memory_persistence.py   # SQLite + JSON 持久化 + PrefChainPersistence 偏好链
+├── memory_postgres.py      # PostgreSQL 后端（pgvector，偏好链可选）
+├── memory_redis.py         # Redis 后端（TTL + Pub/Sub，偏好链可选）
 ├── agentic_rag.py          # Agentic RAG 多跳检索
 ├── audio_pipeline.py       # 音频管线（PersonaPlex 远程 ASR + LLM）
-├── sleep_consolidation.py  # 睡眠整合（记忆巩固+遗忘+反思）
+├── sleep_consolidation.py  # 睡眠整合（记忆巩固+遗忘+反思，15min 定时）
 ├── cog_rec.py              # CogRec 神经符号混合（LLM 教规则引擎）
 ├── action_memory.py        # 动作记忆（记录-重放，<1ms 绕过 LLM）
 ├── prompt_evolution.py     # 双流提示词进化（战术+战略）
 ├── safety_governance.py    # 安全治理（LLM 驱动的运行时安全）
-└── _utils.py               # 共享工具（原子 JSON 写入）
+├── policy_model.py         # 策略模型（基底神经节，反射弧，RAK_REFLEX）
+├── outbound.py             # 出站通道（speak/alert/动作派发 → MQTT/A2A）
+└── _utils.py               # 共享工具（原子 JSON 写入 + LLM 客户端工厂）
 
 src/tools/
-├── __init__.py             # MQTTPublisher 导出
-└── mqtt_publisher.py       # MQTT 发布
+├── __init__.py             # MQTT 发布器导出（懒加载）
+└── mqtt_publisher.py       # MQTT 出站（RakMessage v0 契约，RAK_OUTBOUND 门控）
 
 src/mcp/
-└── skill_mcp_server.py     # MCP JSON-RPC 服务器（21 工具 + 14 资源）
+├── skill_mcp_server.py     # 手写 JSON-RPC 服务器（旧，保留对照）
+└── fastmcp_server.py       # 大脑 MCP 服务器（官方 fastmcp，14 工具，stdio/HTTP）
+
+src/a2a/
+├── server.py               # A2A 服务器（标准 Agent2Agent v1.0，Agent Card + tasks/send + SSE）
+├── client.py               # A2A 客户端（向外部 agent 派发任务）
+└── device_agent.py         # 设备驱动适配器（RAK_DEVICE_AGENTS → A2A/MQTT）
 
 src/prompts/                # 提示词模板（Jinja2）
 ├── config.yaml             # 共享配置（人设、动作列表、输出格式、规则）
@@ -105,13 +114,36 @@ src/prompts/                # 提示词模板（Jinja2）
                 ↓ 未命中或低置信度
        ② 元认知评估 → 置信度打分 + 策略选择
                 ↓ 高/中置信度
-       ③ 用户纠正检查 + 记忆检索 + 用户画像 + LLM 深思（~1s）
+       ③ 用户纠正检查 + 记忆检索 + 用户画像 + 深思（agent 内核，降级单发 JSON）
           → 返回 + 缓存 + 记录到用户模型
                 ↓ 失败
        ④ 规则引擎兜底 → 返回
 
        置信度低 → 返回 confirm 请求（主动询问用户，不硬答）
 ```
+
+### 已接线状态（2026-08 重构后）
+
+之前大量"已实现但未接线"的模块已激活，改动时注意：
+
+- **心跳活着**：`runtime_server.serve()` 用单一常驻 asyncio loop（`run_forever()`）
+  跑 InnerLoop + ProactiveEngine + SleepConsolidation 定时器。gRPC 线程事件经
+  `InnerLoop.on_event` 的线程安全桥接到事件循环线程。
+- **统一单例**：所有认知模块以 `decision_engine` 模块级 `_get_*()` 单例为唯一事实源，
+  `runtime_server` 从中拉取，不再自建并行实例。`_wire_cognitive_graph()` 注入依赖。
+- **深思 = LangGraph agent 内核**：`decide()` 深思路径走 `agent_loop.run_agent`（RAK_AGENT=1
+  默认开），工具=只读认知工具+finalize；模型不支持工具调用时降级单发 JSON。
+- **出站通道**：InnerLoop speak / ProactiveEngine alert 经 `outbound.py` → MQTT/A2A，
+  `RAK_OUTBOUND=1` 才真发（默认只记日志，防污染线上 broker）。
+- **持久化偏好链**：`PrefChainPersistence`，`RAG_POSTGRES_DSN`/`REDIS_URL` 设置时自动升级。
+- **三协议共存**：gRPC(:50051) + A2A(:8000, `python -m src.a2a.server`) + MCP(stdio/HTTP)。
+
+**已知注意**：
+- `_init_lock` 是 RLock（`_get_*` 内部有嵌套 `_get_*` 调用，如 `_get_memory_stream`→`_get_memory_engine`）。
+- 反射弧（PolicyModel）需 `RAK_REFLEX=1` 且 `total_updates>=20` 且置信度≥0.85 才触发，
+  数据来自 `_record_feedback` 的在线学习。
+- `A2AClient` 连接需要服务器 agent card 的 `protocol_binding` 为 SDK 枚举值（`JSONRPC`/`HTTP+JSON`），
+  不是 spec URI。
 
 ### 学习闭环
 

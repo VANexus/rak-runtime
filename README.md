@@ -100,17 +100,19 @@ LLM 驱动的运行时安全判断。唯一硬约束：`emergency_stop` 始终�
 
 ```
 rak-runtime/
-├── runtime_server.py               # gRPC 服务器入口 (:50051)
+├── runtime_server.py               # gRPC 服务器入口 (:50051) + 心跳事件循环
 ├── src/
-│   ├── core/                       # 28 个认知模块
+│   ├── core/                       # 28+ 认知模块
+│   │   ├── agent_loop.py           # ★ Agentic 内核（LangGraph ReAct 工具循环）
+│   │   ├── outbound.py             # ★ 出站通道（说话/告警/动作派发）
 │   │   ├── decision_engine.py      # 决策引擎（中央调度器）
 │   │   ├── prompt_engine.py        # 提示词引擎
 │   │   ├── semantic_cache.py       # 语义缓存
 │   │   ├── learning_loop.py        # 学习闭环
 │   │   ├── memory_engine.py        # 三层认知记忆
-│   │   ├── memory_persistence.py   # SQLite + JSON 持久化
-│   │   ├── memory_postgres.py      # PostgreSQL 后端
-│   │   ├── memory_redis.py         # Redis 后端
+│   │   ├── memory_persistence.py   # SQLite + JSON 持久化 + PrefChainPersistence
+│   │   ├── memory_postgres.py      # PostgreSQL 后端（偏好链可选）
+│   │   ├── memory_redis.py         # Redis 后端（偏好链可选）
 │   │   ├── memory_stream.py        # 联想记忆流
 │   │   ├── living_graph.py         # 活体知识图谱
 │   │   ├── sleep_consolidation.py  # 睡眠整合
@@ -123,47 +125,28 @@ rak-runtime/
 │   │   ├── self_model.py           # 自我认知
 │   │   ├── need_engine.py          # 需求引擎
 │   │   ├── emotion_state.py        # 情绪动力学
-│   │   ├── inner_loop.py           # 内心循环
+│   │   ├── inner_loop.py           # 内心循环（线程安全事件桥接）
 │   │   ├── conversation_state.py   # 对话状态
 │   │   ├── cog_rec.py              # CogRec 神经符号混合
 │   │   ├── action_memory.py        # 动作记忆
 │   │   ├── prompt_evolution.py     # 双流提示词进化
 │   │   ├── safety_governance.py    # 安全治理
-│   │   ├── policy_model.py         # 策略模型（基底神经节）
-│   │   └── _utils.py               # 共享工具
+│   │   ├── policy_model.py         # 策略模型（基底神经节，反射弧）
+│   │   └── _utils.py               # 共享工具（LLM 客户端工厂）
+│   ├── a2a/                        # ★ A2A 协议层（标准 Agent2Agent v1.0）
+│   │   ├── server.py               #   Agent Card + tasks/send + SSE
+│   │   ├── client.py               #   向外部 agent 派发任务
+│   │   └── device_agent.py         #   设备驱动适配器（A2A→MQTT 兜底）
 │   ├── tools/
-│   │   └── __init__.py             # MQTTPublisher
+│   │   └── mqtt_publisher.py       # MQTT 出站（RakMessage v0 契约）
 │   ├── mcp/
-│   │   └── skill_mcp_server.py     # MCP 技能服务器
+│   │   └── fastmcp_server.py       # ★ 大脑 MCP 服务器（fastmcp，14 工具）
 │   └── prompts/                    # 提示词模板（Jinja2）
-│       ├── config.yaml
-│       ├── decision.yaml
-│       ├── decompose.yaml
-│       └── rag.yaml
 ├── protos/
 │   └── runtime.proto               # gRPC 协议定义
 ├── generated/                      # 生成的 gRPC 代码
-├── tests/                          # 单元测试
-│   ├── conftest.py                 # 共享 fixtures
-│   ├── test_meta_cognition.py
-│   ├── test_memory_engine.py
-│   ├── test_emotion_state.py
-│   ├── test_safety_governance.py
-│   ├── test_cog_rec.py
-│   ├── test_prompt_evolution.py
-│   ├── test_semantic_cache.py
-│   ├── test_action_memory.py
-│   └── test_utils.py
-├── docs/                           # 文档目录
-├── homework/                       # Python期末综合实验作业
-│   ├── README.md                   # 作业运行说明、环境配置与排错指南
-│   └── web/                        # 聊天机器人Web交互服务
-│       ├── app.py                  # Flask 后端主程序
-│       └── templates/
-│           └── index.html          # 前端交互页面
-├── AGENTS.md                       # Agent/开发者指南
-├── CLAUDE.md                       # Claude Code 指南
-└── requirements.txt                # 依赖版本锁定
+├── tests/                          # 单元测试 + 集成测试
+└── docs/                           # 文档目录
 ```
 
 ## 快速开始
@@ -213,10 +196,32 @@ python test_e2e_full.py              # 端到端全链路测试
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic API Key | — |
 | `ANTHROPIC_BASE_URL` | API 代理地址 | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `ANTHROPIC_MODEL` | 模型名 | `mimo-v2.5-pro` |
-| `RAG_POSTGRES_DSN` | PostgreSQL 连接串 | `postgresql://rak:***@localhost:5432/rak_memory` |
+| `ANTHROPIC_AUTH_SCHEME` | 鉴权方式：`api_key`(x-api-key) / `bearer`(Authorization) | `api_key` |
+| `RAK_AGENT` | 启用 LangGraph agent 内核（深思路径） | `1` |
+| `RAK_REFLEX` | 启用基底神经节反射弧（需训练） | `0` |
+| `RAK_AGENTIC_RAG` | 启用 Agentic RAG 多跳检索 | `0` |
+| `RAK_OUTBOUND` | 启用出站通道（MQTT/A2A 派发） | `0` |
+| `RAK_DEVICE_AGENTS` | 设备 agent JSON 列表（A2A 派发目标） | `[]` |
+| `RAK_A2A_PORT` | A2A 服务器端口 | `8000` |
+| `RAG_POSTGRES_DSN` | PostgreSQL 连接串（长期记忆偏好链） | — |
+| `REDIS_URL` | Redis 连接串（短期记忆偏好链） | — |
 | `MQTT_BROKER_HOST` | MQTT Broker 地址 | `localhost` |
 | `MQTT_BROKER_PORT` | MQTT Broker 端口 | `1883` |
 | `PERSONAPLEX_SERVER` | PersonaPlex WebSocket | `ws://8.129.26.180:8998/ws` |
+
+## 多协议接入
+
+大脑支持三种接入方式，可同时运行：
+
+```bash
+python runtime_server.py                    # gRPC 决策服务 + 心跳 (:50051)
+python -m src.a2a.server                    # A2A 标准协议 (:8000, Agent Card)
+python -m src.mcp.fastmcp_server --http 8001  # MCP 服务器（HTTP，或默认 stdio）
+```
+
+- **gRPC**：go-kernel 调 `Execute`，返回动作 + 语音回复（原有链路）
+- **A2A**：任何 A2A 客户端/硬件驱动 agent 可派发任务（`tasks/send`），大脑返回动作 artifact
+- **MCP**：Claude Code 等 MCP 客户端可发现并调用大脑的 14 个"神经元"工具
 
 ## 对齐契约
 
