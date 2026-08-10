@@ -996,8 +996,8 @@ class DecisionEngine:
         else:
             user_msg = f"状态: {request.state or '未知'}"
 
-        # ── 步骤 7: LLM 深思（~1s）───────────────────────
-        llm_result = _llm_decide(system_prompt, user_msg)
+        # ── 步骤 7: 深思（agent 内核，降级单发 JSON） ─────
+        llm_result = self._agent_decide(query, available_actions, system_prompt, user_msg)
 
         # ── 步骤 8: 元认知置信度评估 ─────────────────────
         meta = _get_meta_cognition()
@@ -1221,6 +1221,32 @@ class DecisionEngine:
             self._record_to_user_model(text, rule_actions[0].get("action", ""), trace_id)
 
         return {"status": "ok", "asr_text": text, "actions": rule_actions}
+
+    # ========== Agentic 深思（LangGraph 工具调用内核） ==========
+
+    def _agent_decide(self, query: str, available_actions: list,
+                      system_prompt: str, user_msg: str) -> Optional[dict]:
+        """
+        深思步骤：优先 LangGraph agent 内核（RAK_AGENT=1，默认开），
+        失败/模型不支持工具调用时降级为单发 JSON 决策。
+        """
+        if os.getenv("RAK_AGENT", "1") == "0":
+            return _llm_decide(system_prompt, user_msg)
+        result = None
+        try:
+            from src.core.agent_loop import run_agent
+            result = run_agent(user_msg, available_actions, system_prompt=system_prompt)
+        except Exception as e:
+            logger.warning("[AgentLoop] 调用失败，降级单发决策: %s", e)
+        if result:
+            logger.info("[AgentLoop] agent 决策: action=%s, 轨迹=%s",
+                        result.get("action"), result.get("trace"))
+            return {
+                "action": result["action"],
+                "params_json": result.get("params_json", "{}"),
+                "answer": result.get("answer", ""),
+            }
+        return _llm_decide(system_prompt, user_msg)
 
     # ========== 用户模型交互 ==========
 

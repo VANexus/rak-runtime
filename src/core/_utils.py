@@ -138,3 +138,28 @@ def make_llm_client(timeout: float = 15.0):
     else:
         kwargs["api_key"] = key
     return anthropic.Anthropic(**kwargs)
+
+
+def make_langchain_anthropic(model: str, timeout: float = 30.0, max_tokens: int = 512):
+    """
+    创建 langchain-anthropic 的 ChatAnthropic（agent 内核用）。
+
+    langchain-anthropic 内部强制用 api_key 建底层 client，
+    bearer 鉴权通过 default_headers 注入 Authorization 头实现。
+    """
+    from langchain_anthropic import ChatAnthropic
+    kwargs = dict(
+        model=model,
+        base_url=os.getenv(
+            "ANTHROPIC_BASE_URL",
+            "https://token-plan-cn.xiaomimimo.com/anthropic",
+        ),
+        timeout=timeout,
+        max_tokens=max_tokens,
+    )
+    key = os.getenv("ANTHROPIC_AUTH_TOKEN")
+    if os.getenv("ANTHROPIC_AUTH_SCHEME", "api_key") == "bearer":
+        kwargs["default_headers"] = {"Authorization": f"Bearer {key}"}
+    else:
+        kwargs["api_key"] = key
+    return ChatAnthropic(**kwargs)
