@@ -623,16 +623,8 @@ class LearningLoop:
         """获取 LLM 客户端（延迟初始化）"""
         if self._llm_client is None:
             try:
-                import anthropic
-                import os
-                self._llm_client = anthropic.Anthropic(
-                    api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-                    base_url=os.getenv(
-                        "ANTHROPIC_BASE_URL",
-                        "https://token-plan-cn.xiaomimimo.com/anthropic",
-                    ),
-                    timeout=15.0,
-                )
+                from src.core._utils import make_llm_client
+                self._llm_client = make_llm_client(timeout=15.0)
             except Exception as e:
                 logger.warning("[Learning] LLM 客户端初始化失败: %s", e)
         return self._llm_client

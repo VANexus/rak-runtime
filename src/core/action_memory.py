@@ -336,15 +336,8 @@ class ActionMemory:
             self._llm = None
         if self._llm is None:
             try:
-                import anthropic
-                self._llm = anthropic.Anthropic(
-                    api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-                    base_url=os.getenv(
-                        "ANTHROPIC_BASE_URL",
-                        "https://token-plan-cn.xiaomimimo.com/anthropic",
-                    ),
-                    timeout=5.0,
-                )
+                from src.core._utils import make_llm_client
+                self._llm = make_llm_client(timeout=5.0)
             except Exception:
                 pass
         return self._llm

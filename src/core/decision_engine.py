@@ -101,15 +101,8 @@ def _get_llm_client():
         if _llm_client is not None:  # double-check
             return _llm_client if _llm_client is not False else None
         try:
-            import anthropic
-            _llm_client = anthropic.Anthropic(
-                api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-                base_url=os.getenv(
-                    "ANTHROPIC_BASE_URL",
-                    "https://token-plan-cn.xiaomimimo.com/anthropic",
-                ),
-                timeout=15.0,
-            )
+            from src.core._utils import make_llm_client
+            _llm_client = make_llm_client(timeout=15.0)
             logger.info("Anthropic LLM 客户端初始化成功")
         except Exception as e:
             logger.warning("Anthropic LLM 初始化失败: %s，回退到规则引擎", e)

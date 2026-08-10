@@ -265,12 +265,8 @@ def main():
     logger.info("=" * 70)
 
     # 初始化 LLM 客户端（用于用户模拟）
-    import anthropic
-    llm_client = anthropic.Anthropic(
-        api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-        base_url=os.getenv("ANTHROPIC_BASE_URL", "https://token-plan-cn.xiaomimimo.com/anthropic"),
-        timeout=30.0,
-    )
+    from src.core._utils import make_llm_client
+    llm_client = make_llm_client(timeout=30.0)
 
     # 创建引擎
     engine = create_engine()

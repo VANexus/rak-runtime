@@ -114,3 +114,27 @@ def time_diff_minutes(time_str: str) -> float:
         return diff
     except (ValueError, AttributeError):
         return 0.0
+
+
+def make_llm_client(timeout: float = 15.0):
+    """
+    创建 Anthropic 客户端（统一工厂）。
+
+    支持两种鉴权方式（由 ANTHROPIC_AUTH_SCHEME 决定）：
+    - api_key（默认）：发 x-api-key 头（token-plan 代理）
+    - bearer：发 Authorization: Bearer 头（LongCat 等代理）
+    """
+    import anthropic
+    kwargs = dict(
+        base_url=os.getenv(
+            "ANTHROPIC_BASE_URL",
+            "https://token-plan-cn.xiaomimimo.com/anthropic",
+        ),
+        timeout=timeout,
+    )
+    key = os.getenv("ANTHROPIC_AUTH_TOKEN")
+    if os.getenv("ANTHROPIC_AUTH_SCHEME", "api_key") == "bearer":
+        kwargs["auth_token"] = key
+    else:
+        kwargs["api_key"] = key
+    return anthropic.Anthropic(**kwargs)

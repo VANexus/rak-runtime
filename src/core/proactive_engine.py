@@ -143,7 +143,7 @@ class ProactiveEngine:
 
         # 3. 检查学习机会
         if self._learning_loop:
-            insights = self._learning_loop.get_recent_insights()
+            insights = self._learning_loop.get_insights()
             if insights:
                 logger.debug("学习洞察已更新: %d 条", len(insights))
 
