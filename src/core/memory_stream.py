@@ -203,19 +203,22 @@ class MemoryStream:
     def _get_random_recent_memory(self) -> Optional[str]:
         """随机获取一条近期记忆"""
         try:
-            # 先尝试从工作记忆获取
-            if hasattr(self._memory_engine, '_working_memory'):
-                wm = self._memory_engine._working_memory
-                if wm:
-                    return random.choice(wm).content
+            # 优先从工作记忆获取
+            working = getattr(self._memory_engine, "working", None)
+            if working is not None:
+                items = list(working.values())
+                if items:
+                    return random.choice(items).content
 
             # 再尝试从长期记忆获取最近的
-            if hasattr(self._memory_engine, '_ltm') and self._memory_engine._ltm:
-                entries = self._memory_engine._ltm._get_all_entries()
-                if entries:
-                    # 优先选择最近的
-                    recent = sorted(entries, key=lambda e: e.last_accessed, reverse=True)[:20]
-                    return random.choice(recent).content
+            long_term = getattr(self._memory_engine, "long_term", None)
+            if long_term is not None and long_term.items:
+                entries = list(long_term.items.values())
+                # 优先选择最近的
+                recent = sorted(
+                    entries, key=lambda e: e.last_accessed, reverse=True
+                )[:20]
+                return random.choice(recent).content
         except Exception:
             pass
         return None
