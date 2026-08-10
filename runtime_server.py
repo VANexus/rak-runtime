@@ -61,106 +61,69 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
         self._memory_stream = None
         self._emotion_engine = None
         self._inner_loop = None
+        self._sleep_consolidation = None
         self._init_time = time.time()
         self._request_count = 0
+
+        # 常驻事件循环（serve() 注入）+ MVP 动作集
+        self._loop = None
+        self._available_actions = [
+            "shake_head", "wave_hand", "lock_open", "lock_close",
+            "move_forward", "move_back", "turn_left", "turn_right",
+            "dance", "nod", "light_on", "light_off",
+            "emergency_stop", "idle",
+        ]
 
         self._init_cognitive_modules()
 
     def _init_cognitive_modules(self):
-        """初始化认知增强模块"""
-        # 世界模型
-        try:
-            from src.core.world_model import WorldModel
-            self._world_model = WorldModel()
-            logger.info("世界模型已初始化")
-        except Exception as e:
-            logger.warning(f"世界模型初始化失败（降级运行）: {e}")
+        """
+        从 decision_engine 单例拉取认知模块。
 
-        # 提示词引擎
-        try:
-            from src.core.prompt_engine import PromptEngine
-            self._prompt_engine = PromptEngine()
-            logger.info("提示词引擎已初始化")
-        except Exception as e:
-            logger.warning(f"提示词引擎初始化失败（降级运行）: {e}")
+        统一实例来源：decision_engine 的模块级单例是唯一事实源，
+        这里不再自建并行实例（否则 InnerLoop 有依赖没被启动、被启动的没依赖）。
+        """
+        from src.core.decision_engine import (
+            _get_world_model, _get_prompt_engine, _get_semantic_cache,
+            _get_learning_loop, _get_proactive_engine, _get_self_model,
+            _get_need_engine, _get_memory_stream, _get_emotion_engine,
+            _get_inner_loop, _get_sleep_consolidation,
+        )
+        from src.core.outbound import get_outbound
 
-        # 语义缓存
-        try:
-            from src.core.semantic_cache import SemanticCache
-            self._semantic_cache = SemanticCache()
-            logger.info("语义缓存已初始化")
-        except Exception as e:
-            logger.warning(f"语义缓存初始化失败（降级运行）: {e}")
+        modules = {
+            "world_model": _get_world_model,
+            "prompt_engine": _get_prompt_engine,
+            "semantic_cache": _get_semantic_cache,
+            "learning_loop": _get_learning_loop,
+            "proactive_engine": _get_proactive_engine,
+            "self_model": _get_self_model,
+            "need_engine": _get_need_engine,
+            "memory_stream": _get_memory_stream,
+            "emotion_engine": _get_emotion_engine,
+            "inner_loop": _get_inner_loop,
+            "sleep_consolidation": _get_sleep_consolidation,
+        }
+        for name, getter in modules.items():
+            try:
+                setattr(self, f"_{name}", getter())
+                if getattr(self, f"_{name}") is not None:
+                    logger.info("认知模块 %s: ✓", name)
+            except Exception as e:
+                logger.warning("认知模块 %s 初始化失败（降级运行）: %s", name, e)
+                setattr(self, f"_{name}", None)
 
-        # 学习闭环
-        try:
-            from src.core.learning_loop import LearningLoop
-            self._learning_loop = LearningLoop()
-            logger.info("学习闭环已初始化")
-        except Exception as e:
-            logger.warning(f"学习闭环初始化失败（降级运行）: {e}")
-
-        # 主动智能引擎
-        try:
-            from src.core.proactive_engine import ProactiveEngine
-            self._proactive_engine = ProactiveEngine()
-            self._proactive_engine.set_dependencies(
-                world_model=self._world_model,
-                learning_loop=self._learning_loop,
+        # 出站通道：大脑主动说话/告警 → MQTT（RAK_OUTBOUND=1 才真发）
+        outbound = get_outbound()
+        if self._inner_loop:
+            self._inner_loop.set_speak_callback(
+                lambda text: asyncio.to_thread(outbound.speak, text)
             )
-            logger.info("主动智能引擎已初始化")
-        except Exception as e:
-            logger.warning(f"主动智能引擎初始化失败（降级运行）: {e}")
-
-        # 自我模型
-        try:
-            from src.core.self_model import SelfModel
-            import os
-            data_dir = os.path.join(os.path.dirname(__file__), "data")
-            os.makedirs(data_dir, exist_ok=True)
-            persist_path = os.path.join(data_dir, "self_model.json")
-            self._self_model = SelfModel.load(persist_path)
-            logger.info("自我模型已初始化")
-        except Exception as e:
-            logger.warning(f"自我模型初始化失败（降级运行）: {e}")
-
-        # 需求引擎
-        try:
-            from src.core.need_engine import NeedEngine
-            self._need_engine = NeedEngine()
-            logger.info("需求引擎已初始化")
-        except Exception as e:
-            logger.warning(f"需求引擎初始化失败（降级运行）: {e}")
-
-        # 联想记忆流
-        try:
-            from src.core.memory_stream import MemoryStream
-            self._memory_stream = MemoryStream()
-            logger.info("联想记忆流已初始化")
-        except Exception as e:
-            logger.warning(f"联想记忆流初始化失败（降级运行）: {e}")
-
-        # 情绪引擎
-        try:
-            from src.core.emotion_state import EmotionEngine
-            self._emotion_engine = EmotionEngine()
-            logger.info("情绪引擎已初始化")
-        except Exception as e:
-            logger.warning(f"情绪引擎初始化失败（降级运行）: {e}")
-
-        # 内心循环（Agent 的心跳）
-        try:
-            from src.core.inner_loop import InnerLoop
-            self._inner_loop = InnerLoop()
-            self._inner_loop.set_dependencies(
-                emotion_engine=self._emotion_engine,
-                need_engine=self._need_engine,
-                self_model=self._self_model,
-                world_model=self._world_model,
+        if self._proactive_engine:
+            self._proactive_engine.set_alert_callback(
+                lambda alert: asyncio.to_thread(outbound.alert, alert)
             )
-            logger.info("内心循环已初始化")
-        except Exception as e:
-            logger.warning(f"内心循环初始化失败（降级运行）: {e}")
+        logger.info("出站通道已接线（InnerLoop speak + ProactiveEngine alert）")
 
     # ── gRPC 接口实现 ─────────────────────────────────────
 
@@ -240,59 +203,57 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
                 # 生成任务 ID
                 task_id = f"asr-{int(time.time())}"
 
-                # 音频管线处理
+                # 音频双管线处理（在常驻事件循环上执行）
                 try:
-                    event = self.audio_pipeline.process_audio(audio_bytes, task_id)
+                    result = self._run_audio_pipeline(audio_bytes, task_id)
                 except Exception as e:
-                    logger.error(f"音频管线异常: {e}")
-                    event = {
-                        "type": "error",
-                        "error_code": "PIPELINE_ERROR",
-                        "error_message": str(e),
-                    }
+                    logger.error("[StreamASR] 音频管线异常: %s", e)
+                    result = None
 
-                # 如果有动作结果，注入可用动作
-                if event.get("type") == "action_result":
-                    available_actions = [
-                        "shake_head", "wave_hand", "lock_open", "lock_close",
-                        "move_forward", "move_back", "turn_left", "turn_right",
-                        "dance", "nod", "light_on", "light_off",
-                        "emergency_stop", "idle",
-                    ]
-                    try:
-                        decision = self.decision_engine.decide_from_text(
-                            text=event.get("text", ""),
-                            available_actions=available_actions,
-                            trace_id=task_id,
-                        )
-                        event["actions"] = decision.get("actions", [])
-                    except Exception as e:
-                        logger.error(f"动作决策失败: {e}")
-
-                # 生成 trace_id
-                trace_id = f"asr-{int(time.time() * 1000)}"
-
-                # 序列化动作结果
-                actions_json = ""
-                if event.get("actions"):
-                    actions_json = json.dumps(
-                        event["actions"], ensure_ascii=False, indent=2
+                if result is not None and result.asr_text:
+                    logger.info("[StreamASR] 转写: '%s', %d 个动作",
+                                result.asr_text[:50], len(result.actions))
+                    yield runtime_pb2.ASRResponse(
+                        text=result.asr_text,
+                        trace_id=task_id,
+                        is_final=True,
+                        confidence=0.9,
+                        status="ok",
+                        error_message="",
                     )
-
-                yield runtime_pb2.ASRResponse(
-                    text=event.get("text", ""),
-                    trace_id=trace_id,
-                    is_final=True,
-                    confidence=0.9,
-                    status=event.get("type", "error"),
-                    error_message=event.get("error_message", ""),
-                )
+                else:
+                    yield runtime_pb2.ASRResponse(
+                        text="",
+                        trace_id=task_id,
+                        is_final=True,
+                        confidence=0.0,
+                        status="error",
+                        error_message="音频处理失败或无转写结果",
+                    )
 
             elif request.HasField("config"):
                 logger.info("[StreamASR] 配置: language=%s, rate=%d",
                             request.config.language, request.config.sample_rate)
 
         logger.info("[StreamASR] 客户端断开")
+
+    def _run_audio_pipeline(self, audio_bytes: bytes, task_id: str):
+        """
+        在常驻事件循环上运行音频双管线（gRPC 线程 → 事件循环线程的桥接）。
+
+        DualPipelineProcessor.process_audio 是 async 且 PersonaPlex 连接
+        绑定在事件循环线程，必须经 run_coroutine_threadsafe 调度。
+        """
+        if self._loop is None:
+            raise RuntimeError("事件循环未启动")
+        coro = self.audio_pipeline.process_audio(
+            audio_pcm=audio_bytes,
+            available_actions=self._available_actions,
+            trace_id=task_id,
+            device_id="default",
+        )
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=30)
 
     # ── 世界模型更新 ──────────────────────────────────────
 
@@ -346,7 +307,7 @@ class RuntimeServicer(runtime_pb2_grpc.RuntimeServiceServicer):
 
 
 def serve():
-    """启动 gRPC 服务器"""
+    """启动 gRPC 服务器 + 常驻心跳事件循环"""
     port = os.getenv("RUNTIME_PORT", "50051")
 
     # 创建服务器
@@ -375,35 +336,66 @@ def serve():
         if info is not None:
             logger.info(f"  {module}: {'✓' if info else '✗'}")
 
-    # 启动内心循环（Agent 的心跳）
+    # ── 常驻事件循环：心跳 + 主动智能 + 睡眠整合 + 音频管线 ──
     loop = asyncio.new_event_loop()
-    if servicer._inner_loop:
-        loop.run_until_complete(servicer._inner_loop.start())
-        logger.info("  inner_loop: ✓ 心跳已启动")
+    asyncio.set_event_loop(loop)
+    servicer._loop = loop
 
-    # 优雅关闭
+    async def _start_heartbeat():
+        """启动大脑的心跳（InnerLoop + ProactiveEngine + Sleep 定时器）"""
+        if servicer._inner_loop:
+            await servicer._inner_loop.start()
+            logger.info("  inner_loop: ✓ 心跳已启动")
+        if servicer._proactive_engine:
+            await servicer._proactive_engine.start()
+            logger.info("  proactive_engine: ✓ 主动智能已启动")
+        asyncio.create_task(_sleep_loop())
+
+    async def _sleep_loop(interval_minutes: float = 15.0):
+        """睡眠整合定时器（记忆巩固 + 遗忘 + 反思）"""
+        while True:
+            await asyncio.sleep(interval_minutes * 60)
+            if servicer._sleep_consolidation:
+                try:
+                    servicer._sleep_consolidation.consolidate()
+                    logger.info("[Sleep] 睡眠整合完成")
+                except Exception as e:
+                    logger.warning("[Sleep] 睡眠整合失败: %s", e)
+
+    loop.run_until_complete(_start_heartbeat())
+
+    # 优雅关闭：信号 → 停 loop → finally 收尾
     def graceful_shutdown(signum, frame):
         logger.info("收到关闭信号，正在优雅关闭...")
-        # 保存所有记忆到磁盘
-        try:
-            save_all_memories()
-        except Exception as e:
-            logger.warning("保存记忆失败: %s", e)
-        if servicer._inner_loop:
-            loop.run_until_complete(servicer._inner_loop.stop())
-        if servicer._proactive_engine:
-            loop.run_until_complete(servicer._proactive_engine.stop())
-        server.stop(grace=5)
-        logger.info("服务器已关闭")
-        sys.exit(0)
+        loop.stop()
 
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
 
     try:
-        server.wait_for_termination()
+        loop.run_forever()
     except KeyboardInterrupt:
-        graceful_shutdown(None, None)
+        pass
+    finally:
+        # 保存所有记忆到磁盘
+        try:
+            save_all_memories()
+        except Exception as e:
+            logger.warning("保存记忆失败: %s", e)
+        # 停止心跳
+        if servicer._inner_loop:
+            try:
+                loop.run_until_complete(servicer._inner_loop.stop())
+            except Exception:
+                pass
+        if servicer._proactive_engine:
+            try:
+                loop.run_until_complete(servicer._proactive_engine.stop())
+            except Exception:
+                pass
+        server.stop(grace=5)
+        loop.close()
+        logger.info("服务器已关闭")
 
 
 if __name__ == "__main__":

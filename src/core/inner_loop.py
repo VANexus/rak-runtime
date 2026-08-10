@@ -75,6 +75,7 @@ class InnerLoop:
         # 安静联想的后台任务
         self._idle_task: Optional[asyncio.Task] = None
         self._running = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 统计
         self._stats = {
@@ -107,6 +108,7 @@ class InnerLoop:
             return
         self._running = True
         self._stats["start_time"] = time.time()
+        self._loop = asyncio.get_running_loop()
         self._idle_task = asyncio.create_task(self._idle_loop())
         logger.info("内心循环已启动（事件驱动 + 安静联想）")
 
@@ -126,11 +128,27 @@ class InnerLoop:
 
     def on_event(self, event_type: str, details: dict):
         """
-        事件发生时立刻调用。
+        事件发生时立刻调用（线程安全）。
 
         这是主要的"思考"触发器。
         每个 gRPC 请求、设备状态变化、异常都算一个事件。
+        可能从 gRPC 线程池线程调用，这里统一桥接到事件循环线程执行。
         """
+        if self._loop is None:
+            # 未启动（测试/降级场景）：同步处理
+            self._on_event_sync(event_type, details)
+            return
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if current is self._loop:
+            self._on_event_sync(event_type, details)
+        else:
+            self._loop.call_soon_threadsafe(self._on_event_sync, event_type, details)
+
+    def _on_event_sync(self, event_type: str, details: dict):
+        """事件的实际处理（必须在事件循环线程执行）"""
         self._last_event_time = time.time()
         self._event_count += 1
         self._stats["total_events"] += 1

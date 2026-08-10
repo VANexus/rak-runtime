@@ -40,7 +40,10 @@ _cog_rec = None
 _action_memory = None
 _prompt_evolution = None
 _safety_governance = None
-_init_lock = threading.Lock()
+_world_model = None
+_proactive_engine = None
+_sleep_consolidation = None
+_init_lock = threading.RLock()  # 可重入锁：_get_* 内部存在嵌套 _get_* 调用
 
 
 def _get_memory_engine():
@@ -406,6 +409,95 @@ def _get_safety_governance():
     return _safety_governance if _safety_governance is not False else None
 
 
+def _get_world_model():
+    global _world_model
+    if _world_model is not None:
+        return _world_model if _world_model is not False else None
+    with _init_lock:
+        if _world_model is not None:  # double-check
+            return _world_model if _world_model is not False else None
+        try:
+            from src.core.world_model import WorldModel
+            _world_model = WorldModel()
+            logger.info("世界模型初始化成功")
+        except Exception as e:
+            logger.warning("世界模型初始化失败: %s", e)
+            _world_model = False
+    return _world_model if _world_model is not False else None
+
+
+def _get_proactive_engine():
+    global _proactive_engine
+    if _proactive_engine is not None:
+        return _proactive_engine if _proactive_engine is not False else None
+    with _init_lock:
+        if _proactive_engine is not None:  # double-check
+            return _proactive_engine if _proactive_engine is not False else None
+        try:
+            from src.core.proactive_engine import ProactiveEngine
+            _proactive_engine = ProactiveEngine()
+            logger.info("主动智能引擎初始化成功")
+        except Exception as e:
+            logger.warning("主动智能引擎初始化失败: %s", e)
+            _proactive_engine = False
+    return _proactive_engine if _proactive_engine is not False else None
+
+
+def _get_sleep_consolidation():
+    global _sleep_consolidation
+    if _sleep_consolidation is not None:
+        return _sleep_consolidation if _sleep_consolidation is not False else None
+    with _init_lock:
+        if _sleep_consolidation is not None:  # double-check
+            return _sleep_consolidation if _sleep_consolidation is not False else None
+        try:
+            from src.core.sleep_consolidation import SleepConsolidation
+            mem = _get_memory_engine()
+            persistence = getattr(mem, "persistence", None) if mem else None
+            _sleep_consolidation = SleepConsolidation(
+                memory_engine=mem,
+                persistence_manager=persistence,
+                llm_client=_get_llm_client(),
+            )
+            logger.info("睡眠整合引擎初始化成功")
+        except Exception as e:
+            logger.warning("睡眠整合引擎初始化失败: %s", e)
+            _sleep_consolidation = False
+    return _sleep_consolidation if _sleep_consolidation is not False else None
+
+
+def _wire_cognitive_graph():
+    """
+    统一认知图：把真实依赖注入 InnerLoop / ProactiveEngine / MemoryStream。
+
+    这些模块原来各自带空依赖实例（runtime_server 与 decision_engine 各建一套，
+    导致有依赖的没被启动、被启动的没依赖）。这里以 decision_engine 单例为唯一
+    事实源，一次接线，消除双实例。
+    """
+    inner = _get_inner_loop()
+    if inner:
+        inner.set_dependencies(
+            emotion_engine=_get_emotion_engine(),
+            need_engine=_get_need_engine(),
+            living_graph=_get_living_graph(),
+            self_model=_get_self_model(),
+            world_model=_get_world_model(),
+            conversation_state=_get_conversation_state(),
+        )
+
+    proactive = _get_proactive_engine()
+    if proactive:
+        proactive.set_dependencies(
+            world_model=_get_world_model(),
+            user_model=_get_user_model(),
+            learning_loop=_get_learning_loop(),
+        )
+
+    stream = _get_memory_stream()
+    if stream:
+        stream.set_memory_engine(_get_memory_engine())
+
+
 # ========== LLM 调用（StreamMA 流式优化） ==========
 
 def _try_parse_json(text: str) -> Optional[dict]:
@@ -626,6 +718,11 @@ class DecisionEngine:
         _get_memory_stream()
         _get_emotion_engine()
         _get_living_graph()
+        _get_world_model()
+        _get_proactive_engine()
+
+        # 统一认知图（注入依赖，消除双实例）
+        _wire_cognitive_graph()
 
         # 启动联想记忆流
         stream = _get_memory_stream()
