@@ -55,12 +55,22 @@ class Outbound:
                         getattr(alert, "level", "?"),
                         getattr(alert, "message", "")[:60])
 
-    def publish_action(self, device_id: str, action: str, params_json: str = "") -> bool:
-        """动作派发到硬件层"""
-        if self._publisher:
-            return self._publisher.publish_action(device_id, action, params_json)
-        logger.info("[Outbound] 动作(未发布): %s -> %s", device_id, action)
-        return False
+    def publish_action(self, device_id: str, action: str,
+                       params_json: str = "", trace_id: str = "") -> bool:
+        """
+        动作派发到硬件层：优先 A2A 设备 agent，MQTT 兜底。
+        """
+        if not self._enabled:
+            logger.info("[Outbound] 出站禁用（RAK_OUTBOUND=1 启用），动作 %s -> %s",
+                        device_id, action)
+            return False
+        try:
+            from src.a2a.device_agent import dispatch_action
+            channel, result = dispatch_action(action, params_json, device_id, trace_id)
+            return bool(result) or channel == "a2a"
+        except Exception as e:
+            logger.warning("[Outbound] 设备派发异常: %s", e)
+            return False
 
 
 _outbound = None
