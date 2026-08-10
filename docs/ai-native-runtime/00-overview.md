@@ -46,10 +46,10 @@ rak-runtime 不是纯编码工具（Claude Code / OpenCode），但**内核要�
 ## 分析来源
 
 - **竞品代码深挖**（`/mnt/shared/XRAK/ce`，4 组并行分析）：
-  - 编码内核：codex（Rust）、opencode（TS）、claw-code（Rust）、CodeWhale（Rust）
-  - Claude Code 生产内核：`anthropic-ai-claude-code-2.1.88`
-  - 管家 agent：openclaw（TS）、hermes-agent（Python）
-  - 记忆/插件：claude-mem、CLI-Anything
+  - 编码内核：codex（Rust）、opencode（TS）、claw-code（Rust）、CodeWhale（Rust）— ⏳ 分析中
+  - Claude Code 生产内核：`anthropic-ai-claude-code-2.1.88` — ⏳ 分析中
+  - 管家 agent：openclaw（TS）、hermes-agent（Python）— ⏳ 分析中
+  - 记忆/插件：claude-mem、CLI-Anything — ✅ 已并入（03/02/04 章）
 - **行业前沿方法论**：
   - Anthropic Context Engineering（有效上下文工程）
   - Anthropic Agent Skills（渐进式披露、SKILL.md 开放标准 agentskills.io）
