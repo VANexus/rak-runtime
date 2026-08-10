@@ -1,0 +1,85 @@
+# 06 — 具身智能大脑（Embodied Brain）
+
+> 这是 rak-runtime 区别于编码 agent 与通用管家的核心：**大脑有身体**。
+> 仿生认知（心跳/情绪/需求/联想）是内在状态机，硬件通信（A2A/gRPC/MCP）是外在手脚。
+
+## 现状
+
+- **心跳活着**：单一常驻 asyncio loop 跑 InnerLoop（事件驱动三层节奏）+ ProactiveEngine（30s 检查）+ SleepConsolidation（15min 整合）
+- **情绪/需求**：六维情绪事件驱动 + 衰减；六维需求由真实信号推导；都注入决策 prompt
+- **自我认知**：SelfModel（身份/能力/性格/关系/信念）
+- **活体图谱 + 联想流**：扩散激活记忆，联想洞察注入决策
+- **出站**：InnerLoop speak / ProactiveEngine alert → outbound → MQTT/A2A（RAK_OUTBOUND 门控）
+- **硬件通信**：gRPC（go-kernel 单向入站）+ A2A（Agent Card + tasks/send 双向）+ MCP（外部可连）
+- **世界模型**：设备状态地图 + 状态转移预测 + 异常检测
+
+## 差距
+
+1. **出站默认关**：大脑还不能主动说话/动（`RAK_OUTBOUND=1` 才真发）。主动表达没在真实链路验证。
+2. **世界模型未进决策**：`predict_next_state` / `detect_anomaly` 在决策 prompt 中很少体现——
+   大脑决策时不"想象后果"，异常不阻断当前动作。
+3. **设备发现静态**：`RAK_DEVICE_AGENTS` 是 env 静态配置；没有运行时发现/注册。
+4. **主动性规则化**：ProactiveEngine 靠时间规律预测（rule-based）；没有让 LLM 判断"该不该主动"。
+5. **情绪未反向驱动工具选择**：情绪只改 prompt 措辞；压力大时应该倾向确认/保守动作（工具级），目前没有。
+6. **无"身体预算"**：能耗/执行频率/设备健康度不约束决策——真机器会磨损。
+
+## 目标设计
+
+### 1. 感知 → 决策 → 行动的完整回路
+
+```
+硬件状态/事件（MQTT/A2A/gRPC）
+   → WorldModel 更新
+   → 情绪/需求更新（InnerLoop 事件）
+   → 异常检测：命中高危 → 直接阻断（不进 agent 循环）
+   → 决策（agent 内核，注入世界模型预测 + 身体预算）
+   → 动作（execute_action → 权限门 → A2A/MQTT 派发）
+   → 结果回喂 → WorldModel 转移记录 + 反射弧学习 + 记忆
+```
+
+### 2. 世界模型进决策（想象后果）
+
+- 决策 prompt 注入：当前设备状态 + `predict_next_state(候选动作)`（"如果执行 X，预计结果 Y"）。
+- 这给 LLM"反事实评估"能力（参考 SiRA）：选动作前想象结果。
+- 异常检测（`detect_all_anomalies`）→ 高危异常在 agent 循环外直接触发紧急路径。
+
+### 3. 设备发现动态化
+
+- **MCP 客户端拉入**：硬件驱动作为 MCP 服务器注册，大脑运行时发现其工具 → 注入 agent 循环。
+- **A2A 发现**：设备 agent 通过 Agent Card 广播能力，大脑缓存 + 更新 `device registry`。
+- 目标：新硬件 = 跑一个 MCP/A2A 服务，大脑自动获得新能力（无需改核心代码）。
+
+### 4. 主动性升级（LLM 判断 + 规则保底）
+
+- 保留 rule-based 触发（时间规律/异常），但**是否真正打扰用户**由 LLM 判断：
+  `should_interrupt(need, user_context, priority)` 工具 → yes/no + 措辞。
+- 出站通道保持门控（`RAK_OUTBOUND=1`），但分级：critical 告警（安全）恒放行，普通打扰需确认。
+
+### 5. 情绪 → 行为（工具级）
+
+| 情绪状态 | 行为倾向 |
+|----------|----------|
+| 压力高（stress>0.6） | 动作类工具权限升级为 ask；回复更简洁 |
+| 自信高（confidence>0.7） | 允许直接执行已知安全动作 |
+| 恐惧高（fear>0.6） | 所有动作 ask，倾向 emergency_stop 兜底 |
+
+- 实现：权限门读 `EmotionEngine` 派生状态，动态调整 device 类工具的 ask/allow 阈值。
+
+### 6. 身体预算（Body Budget）
+
+- `WorldModel` 增加 `body_budget`：能耗率、执行频率上限、设备健康度。
+- 决策前检查：动作是否超出预算 → 拒绝或降频。
+- 这是真机器（电机/舵机会磨损）的硬约束，也是"具身"区别于纯软件的标志。
+
+## 落地步骤
+
+1. 决策注入世界模型预测 + 异常阻断路径
+2. 设备 registry（MCP 客户端发现 + A2A card 缓存）
+3. 主动性的 LLM 判断层（`should_interrupt` 工具）
+4. 情绪 → 权限门联动
+5. `body_budget` 进世界模型 + 决策约束
+
+## 竞品借鉴
+
+> ⏳ 待竞品分析返回后补充：openclaw 的多通道主动通信与 cron、hermes 的 gateway 双向通道。
+> 具身特有部分（世界模型/身体预算/异常阻断）无竞品可抄，为原创设计。
