@@ -1459,6 +1459,10 @@ class DecisionEngine:
                 "message": f"动作 '{request.action}' 不在允许列表中",
             }
 
+        # 没有 action、没有 state、没有音频 → 无任何可决策的输入
+        if not (request.action or request.state or getattr(request, "audio", None)):
+            return {"is_valid": False, "message": "action 与 state 不能同时为空"}
+
         if request.params_json:
             try:
                 json.loads(request.params_json)

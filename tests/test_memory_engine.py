@@ -17,8 +17,10 @@ class TestMemoryEntry(unittest.TestCase):
         """应能创建记忆条目"""
         from src.core.memory_engine import MemoryEntry
         entry = MemoryEntry(
+            id="test-id",
             content="test memory",
             memory_type="episodic",
+            layer="long_term",
             importance=0.8,
         )
         self.assertEqual(entry.content, "test memory")
@@ -29,8 +31,10 @@ class TestMemoryEntry(unittest.TestCase):
         """显著性应考虑重要度、新鲜度和频率"""
         from src.core.memory_engine import MemoryEntry
         entry = MemoryEntry(
+            id="test-id",
             content="test",
             memory_type="episodic",
+            layer="long_term",
             importance=0.5,
         )
         # 新创建的记忆应有合理的显著性
@@ -42,8 +46,10 @@ class TestMemoryEntry(unittest.TestCase):
         """访问应增加频率因子"""
         from src.core.memory_engine import MemoryEntry
         entry = MemoryEntry(
+            id="test-id",
             content="test",
             memory_type="episodic",
+            layer="long_term",
             importance=0.5,
         )
         initial_salience = entry.salience
@@ -84,7 +90,7 @@ class TestWorkingMemory(unittest.TestCase):
             )
 
         # 工作记忆不应超过最大大小
-        self.assertLessEqual(len(engine.working_memory), 10)
+        self.assertLessEqual(len(list(engine.working.values())), 10)
 
 
 class TestMemoryTypes(unittest.TestCase):
