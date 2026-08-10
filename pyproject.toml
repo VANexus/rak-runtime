@@ -4,22 +4,35 @@ version = "0.3.0"
 requires-python = ">=3.11"
 dependencies = [
     # gRPC 通信
-    "grpcio>=1.60.0",
-    "grpcio-tools>=1.60.0",
-    "protobuf>=4.25.0",
+    "grpcio>=1.65",
+    "grpcio-tools>=1.65",
+    "protobuf>=4.25",
 
     # LLM 决策引擎（外部 API）
-    "anthropic>=0.52.0",
+    "anthropic>=0.52",
 
     # MQTT 通信
     "paho-mqtt>=1.6.1",
 
     # PersonaPlex 远程 ASR（WebSocket）
-    "websockets>=12.0",
+    "websockets>=12",
 
     # 提示词模板
     "pyyaml>=6.0",
     "jinja2>=3.1",
+
+    # Agentic 内核（LangGraph 工具调用循环）
+    "langgraph",
+    "langchain-core",
+    "langchain-anthropic",
+
+    # MCP 服务器（大脑神经元接口）
+    "fastmcp",
+
+    # A2A 协议（标准 Agent2Agent v1.0）
+    "a2a-sdk>=1.1.0",
+    "fastapi",
+    "uvicorn",
 
     # 持久化存储
     # 可选：psycopg2-binary（PostgreSQL）、redis（Redis）
