@@ -43,6 +43,8 @@ _safety_governance = None
 _world_model = None
 _proactive_engine = None
 _sleep_consolidation = None
+_policy_model = None
+_agentic_rag = None
 _init_lock = threading.RLock()  # 可重入锁：_get_* 内部存在嵌套 _get_* 调用
 
 
@@ -55,13 +57,13 @@ def _get_memory_engine():
             return _memory_engine if _memory_engine is not False else None
         try:
             from src.core.memory_engine import CognitiveMemoryEngine
-            # 创建持久化管理器
+            # 创建持久化管理器（偏好链：Postgres → Redis → SQLite/JSON）
             persistence = None
             try:
-                from src.core.memory_persistence import PersistentMemoryManager
+                from src.core.memory_persistence import PrefChainPersistence
                 data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "memory")
-                persistence = PersistentMemoryManager(data_dir)
-                logger.info("持久化记忆管理器初始化成功")
+                persistence = PrefChainPersistence(data_dir)
+                logger.info("持久化记忆管理器初始化成功（%s）", persistence.backend_name)
             except Exception as e:
                 logger.warning("持久化管理器初始化失败（纯内存模式）: %s", e)
 
@@ -459,6 +461,57 @@ def _get_sleep_consolidation():
     return _sleep_consolidation if _sleep_consolidation is not False else None
 
 
+def _get_policy_model():
+    """基底神经节（策略模型管理器）—— 快速反射通道，RAK_REFLEX=1 才启用"""
+    global _policy_model
+    if _policy_model is not None:
+        return _policy_model if _policy_model is not False else None
+    with _init_lock:
+        if _policy_model is not None:
+            return _policy_model if _policy_model is not False else None
+        try:
+            from src.core.policy_model import PolicyModelManager, DEFAULT_ACTION_SPACE
+            _policy_model = PolicyModelManager()
+            _policy_model.get_or_create("default", DEFAULT_ACTION_SPACE)
+            logger.info("策略模型（基底神经节）初始化成功")
+        except Exception as e:
+            logger.warning("策略模型初始化失败: %s", e)
+            _policy_model = False
+    return _policy_model if _policy_model is not False else None
+
+
+def _get_agentic_rag():
+    """Agentic RAG 多跳检索引擎（检索函数接记忆引擎）"""
+    global _agentic_rag
+    if _agentic_rag is not None:
+        return _agentic_rag if _agentic_rag is not False else None
+    with _init_lock:
+        if _agentic_rag is not None:
+            return _agentic_rag if _agentic_rag is not False else None
+        try:
+            from src.core.agentic_rag import AgenticRAGWithLLM, RetrievalResult
+
+            def _retrieve(query, top_k=5):
+                mem = _get_memory_engine()
+                if mem is None:
+                    return []
+                results = mem.recall(query, top_k=top_k)
+                return [
+                    RetrievalResult(content=r.entry.content, source="memory",
+                                    similarity=r.similarity)
+                    for r in results
+                ]
+
+            _agentic_rag = AgenticRAGWithLLM(
+                retrieve_fn=_retrieve, llm_client=_get_llm_client()
+            )
+            logger.info("Agentic RAG 初始化成功")
+        except Exception as e:
+            logger.warning("Agentic RAG 初始化失败: %s", e)
+            _agentic_rag = False
+    return _agentic_rag if _agentic_rag is not False else None
+
+
 def _wire_cognitive_graph():
     """
     统一认知图：把真实依赖注入 InnerLoop / ProactiveEngine / MemoryStream。
@@ -832,6 +885,17 @@ class DecisionEngine:
                 logger.info("[TraceID: %s] ActionMemory 重放: %s (%sms)",
                             trace_id, replay_result["action"], latency)
                 return result
+
+        # 反射弧：基底神经节（RAK_REFLEX=1 且已训练才启用）
+        reflex = self._reflex_path(query, available_actions)
+        if reflex:
+            result = {"status": "ok", **reflex}
+            self._record_to_user_model(query, reflex["action"], trace_id)
+            self._record_feedback(trace_id, query, result, True)
+            latency = int((time.time() - start_time) * 1000)
+            logger.info("[TraceID: %s] 反射弧命中: %s (%sms)",
+                        trace_id, reflex["action"], latency)
+            return result
 
         # ── 步骤 2: 用户纠正历史检查 ─────────────────────
         user_model = _get_user_model()
@@ -1262,6 +1326,66 @@ class DecisionEngine:
                 "success": success,
             })
 
+    # ========== 基底神经节（策略模型反射弧） ==========
+
+    def _build_state_features(self, query: str) -> dict:
+        """把查询转为策略模型的数值特征（关键词 + 长度）"""
+        features = {"query_len": min(1.0, len(query) / 20.0)}
+        for kw in ["开", "关", "前进", "后退", "左转", "右转", "锁", "门",
+                   "灯", "挥手", "点头", "摇头", "跳舞", "停止", "打开", "关闭"]:
+            features[f"kw_{kw}"] = 1.0 if kw in query else 0.0
+        return features
+
+    def _reflex_path(self, query: str, available_actions: list) -> Optional[dict]:
+        """
+        基底神经节反射弧：已训练的模式直接反应，<1ms 绕过 LLM。
+
+        仅在 RAK_REFLEX=1 且模型见过足够样本（total_updates >= 20）
+        且置信度 >= 0.85 且非探索（method=policy）时才触发。
+        """
+        if os.getenv("RAK_REFLEX", "0") != "1":
+            return None
+        pm = _get_policy_model()
+        if pm is None:
+            return None
+        try:
+            model = pm.get_or_create("default")
+            if model.total_updates < 20:
+                return None  # 随机权重不可作反射
+            from src.core.policy_model import StateVector
+            decision = model.decide(
+                StateVector(features=self._build_state_features(query))
+            )
+            if decision.method != "policy" or decision.confidence < 0.85:
+                return None
+            if decision.action_name not in available_actions:
+                return None
+            return {"action": decision.action_name, "params_json": "{}",
+                    "source": "reflex"}
+        except Exception as e:
+            logger.debug("[Reflex] 反射失败: %s", e)
+            return None
+
+    def _update_policy_model(self, query: str, action: str, reward: float):
+        """策略模型在线学习（REINFORCE 风格）：成功 +1，失败 -1"""
+        if os.getenv("RAK_REFLEX", "0") != "1":
+            return
+        pm = _get_policy_model()
+        if pm is None or not action:
+            return
+        try:
+            model = pm.get_or_create("default")
+            action_id = model.action_space.get_id(action)
+            if action_id < 0:
+                return
+            from src.core.policy_model import StateVector
+            model.update(
+                StateVector(features=self._build_state_features(query)),
+                action_id, reward,
+            )
+        except Exception as e:
+            logger.debug("[Reflex] 学习失败: %s", e)
+
     # ========== 元认知交互 ==========
 
     def _record_meta_decision(self, query: str, strategy: str,
@@ -1303,6 +1427,16 @@ class DecisionEngine:
         }
 
     # ========== 记忆上下文构建 ==========
+
+    def _is_knowledge_question(self, text: str) -> bool:
+        """判断是否为知识性问题（非直接动作指令）"""
+        question_markers = ["什么", "怎么", "为什么", "如何", "吗", "?", "？",
+                            "几点", "是谁", "哪个", "哪一"]
+        action_markers = ["开", "关", "前进", "后退", "转", "停止",
+                          "挥手", "点头", "摇头", "跳舞", "锁门"]
+        has_question = any(m in text for m in question_markers)
+        has_action = any(m in text for m in action_markers)
+        return has_question and not has_action
 
     def _build_memory_context(self, query: str) -> str:
         """
@@ -1353,6 +1487,23 @@ class DecisionEngine:
             if context:
                 parts.append(f"## 当前对话\n{context}")
 
+        # Agentic RAG 多跳检索：知识问题 + 记忆稀疏 + RAK_AGENTIC_RAG=1
+        if (os.getenv("RAK_AGENTIC_RAG", "0") == "1"
+                and self._is_knowledge_question(query)
+                and sum(len(p) for p in parts) < 150):
+            rag = _get_agentic_rag()
+            if rag:
+                try:
+                    rag_result = rag.query(query, top_k=4)
+                    if rag_result.answer:
+                        parts.append("## 多跳检索证据")
+                        for ev in rag_result.evidence[:5]:
+                            parts.append(f"- {ev[:120]}")
+                        logger.info("[AgenticRAG] 多跳检索 %d 步，注入证据",
+                                    rag_result.total_steps)
+                except Exception as e:
+                    logger.warning("[AgenticRAG] 查询失败: %s", e)
+
         result = "\n".join(parts)
         if result:
             logger.info("[Memory] 注入记忆上下文到 prompt")
@@ -1367,6 +1518,12 @@ class DecisionEngine:
                 loop.on_decision(trace_id, query, result, success)
             except Exception as e:
                 logger.warning("[Learning] 反馈记录失败: %s", e)
+        # 策略模型在线学习（反射弧的数据来源）
+        try:
+            self._update_policy_model(query, result.get("action", ""),
+                                      1.0 if success else -1.0)
+        except Exception as e:
+            logger.debug("[Reflex] 学习反馈失败: %s", e)
 
     # ========== 记忆存储 ==========
 

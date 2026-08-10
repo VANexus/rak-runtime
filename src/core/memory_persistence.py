@@ -431,3 +431,103 @@ class PersistentMemoryManager:
             },
             "sqlite_backend": self.sqlite_backend.stats(),
         }
+
+
+class PrefChainPersistence:
+    """
+    持久化偏好链：PostgreSQL(长期) → Redis(短期) → SQLite/JSON（降级）。
+
+    与 PersistentMemoryManager 同接口，供 CognitiveMemoryEngine 使用。
+    配置：
+    - RAG_POSTGRES_DSN 设置时长期记忆走 Postgres（pgvector），否则 SQLite
+    - REDIS_URL 设置时短期记忆走 Redis（TTL），否则 JSON 文件
+    任一后端不可用自动降级，不崩。
+    """
+
+    def __init__(self, data_dir: str = "data/memory"):
+        self._file = PersistentMemoryManager(data_dir)
+        self._pg = None
+        self._redis = None
+
+        dsn = os.getenv("RAG_POSTGRES_DSN")
+        if dsn:
+            try:
+                from src.core.memory_postgres import PostgresMemoryBackend
+                pg = PostgresMemoryBackend(dsn)
+                if pg.available:
+                    self._pg = pg
+                    logger.info("[Memory] 长期记忆后端: PostgreSQL")
+            except Exception as e:
+                logger.warning("[Memory] Postgres 初始化失败（降级 SQLite）: %s", e)
+
+        url = os.getenv("REDIS_URL")
+        if url:
+            try:
+                from src.core.memory_redis import RedisMemoryBackend
+                rd = RedisMemoryBackend(url)
+                if rd.available:
+                    self._redis = rd
+                    logger.info("[Memory] 短期记忆后端: Redis")
+            except Exception as e:
+                logger.warning("[Memory] Redis 初始化失败（降级文件）: %s", e)
+
+    @property
+    def backend_name(self) -> str:
+        long_b = "postgres" if self._pg else "sqlite"
+        short_b = "redis" if self._redis else "file"
+        return f"{long_b}+{short_b}"
+
+    def save_short_term(self, memories: List[Dict]):
+        if self._redis:
+            for m in memories:
+                self._redis.save_memory(m)
+        else:
+            self._file.save_short_term(memories)
+
+    def load_short_term(self) -> List[Dict]:
+        if self._redis:
+            return self._redis.load_all_memories()
+        return self._file.load_short_term()
+
+    def save_long_term(self, entry: Dict, embedding: Optional[List[float]] = None):
+        if self._pg:
+            self._pg.save_memory(entry, embedding)
+        else:
+            self._file.save_long_term(entry, embedding)
+
+    def load_long_term(self) -> List[Dict]:
+        if self._pg:
+            return self._pg.load_all_memories()
+        return self._file.load_long_term()
+
+    def load_embeddings(self) -> Dict[str, List[float]]:
+        if self._pg:
+            return {}  # pg 行内已存向量；缺失时回忆走关键词兜底
+        return self._file.load_embeddings()
+
+    def record_execution(self, action: str, success: bool,
+                         latency_ms: float = 0, context: str = ""):
+        if self._pg:
+            self._pg.record_execution(action, success, latency_ms)
+        else:
+            self._file.record_execution(action, success, latency_ms, context)
+
+    def record_reflection(self, reflection: Dict):
+        self._file.record_reflection(reflection)
+
+    def get_execution_stats(self, action: Optional[str] = None) -> Dict:
+        if self._pg:
+            return self._pg.get_execution_stats(action)
+        return self._file.get_execution_stats(action)
+
+    def prune(self) -> int:
+        if self._pg:
+            return self._pg.prune_low_salience()
+        return self._file.prune()
+
+    def stats(self) -> Dict:
+        return {
+            "backend": self.backend_name,
+            "postgres": self._pg.stats() if self._pg else {"available": False},
+            "sqlite": self._file.stats(),
+        }
