@@ -29,8 +29,8 @@ from src.core.hooks import (
 )
 
 
-def _mk_tool(fn, name: str):
-    """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE（异常不阻断，降级原则）"""
+def _mk_tool(fn, name: str, session=None):
+    """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE + 记录轨迹（异常不阻断）"""
     @tool
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -41,15 +41,22 @@ def _mk_tool(fn, name: str):
             status = "ok"
         except Exception as e:
             result, status = str(e), "error"
+        duration_ms = (time.time() - t0) * 1000
+        if session is not None:
+            from src.core.agent_session import ToolTraceEvent
+            session.append_tool_trace(ToolTraceEvent(
+                tool=name, args=kwargs or {},
+                result=str(result)[:200], duration_ms=duration_ms, status=status,
+            ))
         get_hooks().fire(POST_TOOL_USE, tool=name,
                          result=str(result)[:200], status=status,
-                         duration_ms=(time.time() - t0) * 1000)
+                         duration_ms=duration_ms)
         return result
     return wrapped
 
 
-def _build_tools(available_actions: list, system_prompt: str):
-    """构建认知工具集（钩子包装）+ 决策容器"""
+def _build_tools(available_actions: list, system_prompt: str, session=None):
+    """构建认知工具集（钩子包装 + 轨迹记录）+ 决策容器"""
     decision: dict = {}
 
     def search_memory(query: str, top_k: int = 5) -> str:
@@ -111,25 +118,28 @@ def _build_tools(available_actions: list, system_prompt: str):
         return "决策已记录"
 
     return [
-        _mk_tool(search_memory, "search_memory"),
-        _mk_tool(query_device, "query_device"),
-        _mk_tool(get_emotion, "get_emotion"),
-        _mk_tool(get_needs, "get_needs"),
-        _mk_tool(reflect, "reflect"),
-        _mk_tool(finalize, "finalize"),
+        _mk_tool(search_memory, "search_memory", session),
+        _mk_tool(query_device, "query_device", session),
+        _mk_tool(get_emotion, "get_emotion", session),
+        _mk_tool(get_needs, "get_needs", session),
+        _mk_tool(reflect, "reflect", session),
+        _mk_tool(finalize, "finalize", session),
     ], decision
 
 
 def run_agent(user_msg: str, available_actions: list,
-              system_prompt: str = "") -> Optional[dict]:
+              system_prompt: str = "", trace_id: str = "") -> Optional[dict]:
     """
-    运行 agent 内核，返回决策 dict（action/params_json/answer + trace）。
+    运行 agent 内核，返回决策 dict（action/params_json/answer + trace + session_id）。
 
     失败（模型不支持工具 / 未调 finalize / 异常）返回 None，供上层降级。
+    会话与工具轨迹持久化到 data/sessions/（可诊断/可重放）。
     """
     if not available_actions:
         return None
+    from src.core.agent_session import AgentSession, get_session_store
     session_id = f"agent-{int(time.time() * 1000)}"
+    session = AgentSession(session_id=session_id, trace_id=trace_id)
     get_hooks().fire(SESSION_START, session_id=session_id)
     try:
         from src.core._utils import make_langchain_anthropic
@@ -137,7 +147,7 @@ def run_agent(user_msg: str, available_actions: list,
             os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
             timeout=30, max_tokens=1024,
         )
-        tools, decision = _build_tools(available_actions, system_prompt)
+        tools, decision = _build_tools(available_actions, system_prompt, session)
         agent = create_react_agent(model, tools)
 
         action_desc = "、".join(available_actions)
@@ -151,6 +161,8 @@ def run_agent(user_msg: str, available_actions: list,
             f"params_json 是合法 JSON 字符串，answer 是对用户的自然语言回复。\n"
             f"4. 如果用户在聊天/提问而非下指令，action 选 idle，用 answer 回复。"
         )
+        session.append_message("system", sys_text[:2000])
+        session.append_message("user", user_msg[:2000])
 
         result = agent.invoke({
             "messages": [SystemMessage(content=sys_text),
@@ -168,15 +180,23 @@ def run_agent(user_msg: str, available_actions: list,
                     trace.append(f"llm→{tc.get('name', '?')}")
 
         if decision.get("action"):
-            return {
+            result_dict = {
                 "action": decision["action"],
                 "params_json": decision.get("params_json", "{}"),
                 "answer": decision.get("answer", ""),
                 "trace": trace,
+                "session_id": session_id,
             }
+            session.mark_completed(result_dict)
+            session.append_message("assistant", str(decision.get("answer", ""))[:2000])
+            get_session_store().save(session)
+            return result_dict
         logger.info("[AgentLoop] 模型未调用 finalize，轨迹: %s", trace)
+        session.mark_error("模型未调用 finalize")
     except Exception as e:
         logger.warning("[AgentLoop] 失败（降级单发决策）: %s", e)
+        session.mark_error(str(e))
     finally:
         get_hooks().fire(SESSION_END, session_id=session_id)
+        get_session_store().save(session)
     return None
