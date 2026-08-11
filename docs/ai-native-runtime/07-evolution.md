@@ -81,5 +81,22 @@
 
 ## 竞品借鉴
 
-> ⏳ 待竞品分析返回后补充：hermes/openclaw 的持续学习、claude-mem 的记忆效用。
-> rak-runtime 的学习模块数量已超多数竞品，重点是补闭环度量与落盘，而非新增机制。
+### 结论先行
+
+竞品分析确认：**rak-runtime 的学习模块数量已超多数竞品**（Reflexion/ExpeL/MemGPT/Voyager/CogRec/ActionMemory/PromptEvolution/反射弧全都有），缺的不是新机制，而是**闭环度量 + 全量落盘 + 护栏**。借鉴聚焦这三块。
+
+### hermes（自我改进闭环，最相关）
+
+- **`/learn` + `skill_manage` + curator 三件套**：`/learn` 把用户描述的任何东西生成技能创建提示；`skill_manage` 让 agent 自己写/改技能；`curator` 后台审查 agent-created 技能（pin/archive/consolidate/patch）。
+- **curator 护栏**：只动 `created_by:"agent"` 的、**永不删除只归档**、pinned 豁免一切自动转换、技能使用遥测（use_count/patch_count/last_activity/state）。
+- → rak-runtime 的技能自动沉淀（G12）直接抄这套：agent 创建技能 → 后台 curator 审查 → 归档不删 → 遥测驱动淘汰。
+
+### openclaw（dreaming 巩固）
+
+- **记忆巩固移出回复路径**："writing is the hard part"——把策展从繁忙回复路径移到后台 dreaming（light→REM→deep 三阶段）。
+- **确定性门 + 有界模型**：先确定性打分门槛（relevance/频率/多样性/recency 加权），过了才让有界 LLM consolidate；写前记录 pre-image、原子 rename、失败回退 append-only。
+- → rak-runtime 的 SleepConsolidation 已做记忆整合，补上"确定性门 + 有界模型 + 失败不阻塞"语义（对应 G23 度量）。
+
+### claude-mem（写路径工程）
+
+- observation 的幂等（content-hash）+ pending-queue + 隐私护栏（见 03 章）——学习资产的写入也适用：技能/规则/度量落盘幂等、队列化、护栏过滤。

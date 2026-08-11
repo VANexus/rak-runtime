@@ -82,3 +82,14 @@ skills/
   3. **preflight 式技能检查**：技能加载前先检查前置（设备在位、工具可用、权限放行）
 
 **不必学的**：CLI-Anything 的技能是纯 CLI 编排（无认知/记忆维度）；开源的 skills 标准（agentskills.io）已吸收其渐进披露思想，直接采用标准即可。
+
+### openclaw（最完整的技能体系）
+
+| openclaw 设计 | 移植到 rak-runtime |
+|---|---|
+| **技能 = markdown 指令 + 环境门控，不是代码插件**：SKILL.md 编译成紧凑 XML 块注入系统提示（每技能 ~97 字符 ≈ 24 token），`requires.bins/env/config` 在加载期决定可用性 | 设备操作技能（校准/安全规程）按 `requires.bins`（依赖的 CLI/设备）门控，成本可预测 |
+| **6 级优先级 + 每 agent allowlist**：workspace > 项目 .agents/skills > 个人 > managed > bundled > extraDirs；allowlist 控制可见性 | `skills/` 分级目录 + 大脑能力 allowlist（哪些技能对当前任务可见） |
+| **会话开始快照，会话内不变**：技能集合在会话开始时定格，保 prompt cache 稳定 | agent 会话技能集快照，不动摇缓存前缀（与 01 章一致） |
+| **`$skill` 引用 + 成本预算**：`maxSkillsPromptChars` 预算、描述截断 | 技能索引注入有 token 预算上限 |
+
+**结论**：openclaw 证明"技能是程序性记忆的最轻形态"——markdown + 门控 + 快照，成本可预测。rak-runtime 直接采用 agentskills.io 标准（SKILL.md frontmatter + 渐进披露），补上门控与快照即可。

@@ -69,4 +69,23 @@
 
 ## 竞品借鉴
 
-> ⏳ 待竞品分析返回后补充：hermes 的 gateway 多通道、openclaw 的通信层、codex/opencode 的 ACP/MCP 支持。
+### 关键事实：编码内核不做 A2A
+
+codex / opencode / claw-code / CodeWhale **四个编码 agent 都没有实现 A2A**——它们全是本地单 runtime + MCP 客户端/服务端（opencode 在 `integration/connection.ts` 有 A2A 工作但未形成标准协议）。这印证了一个判断：**rak-runtime 的三协议（gRPC/A2A/MCP）比编码 agent 都超前**。协议层不需要向编码内核学互操作，要向管家学"多通道 + 节点"。
+
+### openclaw（单一控制面 + 节点模型）
+
+- **单一 Gateway 控制面 + 类型化 WS 协议**：一个 host 一个 Gateway，拥有所有会话/工具/事件/渠道连接；外部入口（CLI/app/automation）与 Nodes（伴侣设备）都通过它，协议是 TypeBox 定义→JSON Schema→代码生成的类型化帧。
+- **设备节点模型（role:node + caps/commands + 配对审批）**：外围设备以显式能力声明接入，设备级配对审批。→ **这正是 rak-runtime ↔ go-kernel ↔ ESP/车的目标结构**：大脑作为控制面，设备以 `role:node` + 显式 caps/commands 接入，比现在 gRPC 单点对接多了"能力声明、配对审批、回连"完整模型（对应 05 章 device_registry 设计）。
+- **SecretRefs + egress-time sentinels**：凭据不进配置文件明文，出网前一刻替换，未知形状哨兵 fail-closed。→ rak-runtime 的设备凭据（MQTT/A2A token）同样处理。
+
+### hermes（gateway 多通道 + MCP 双向）
+
+- **relay CapabilityDescriptor 握手**：`contract_version + max_message_length + supports_draft_streaming + markdown_dialect + len_unit + supported_ops`——**一个 gateway 适配器服务所有平台**，无需每通道分支。→ rak-runtime 的出站通道（MQTT/A2A/gRPC）可以同一套能力描述协商，而不是每通道写死。
+- **MCP 双向**：既当 MCP client 接第三方服务器，又当 MCP server 暴露会话/工具给外部（镜像 OpenClaw 9 工具桥）。→ 印证 05 章"大脑作为 MCP 客户端拉入硬件能力"的设计。
+- **cron job 字段设计**：`script` 预跑数据采集脚本（stdout 注入 prompt）、`context_from` 链式传递、`workdir` 带 AGENTS.md 加载、多平台 delivery、**3 分钟硬中断**防 runaway、catchup 窗口钳制。→ 具身定时任务（夜巡/充电检测/日志上报）直接套用这套字段。
+- **后台进程通知**：`terminal(background=true, notify_on_complete=true)` → watcher 检测完成 → 触发新一轮 agent turn。→ 设备动作完成后主动触发下一轮决策（具身闭环）。
+
+### CLI-Anything（协议侧补充）
+
+- 不依赖 MCP 也能桥接真实软件：`subprocess + JSON 契约 + env`；只有软件本身暴露 MCP 时才走 MCP Backend Pattern。→ 印证"设备驱动优先转发命令、MCP 只是其中一种后端"的原则。

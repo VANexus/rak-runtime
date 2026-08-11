@@ -97,3 +97,13 @@ TOOL_DEFS = {
 | **meta-skill（发现即能力）**：把"发现并安装 CLI"本身做成一个 SKILL.md | 把"发现并启用设备/工具"做成大脑技能（`device_discovery`），agent 任务需要时先查再启用 | G13/G19 |
 
 **不必学的**：CLI-Anything 是纯工具编排（无记忆/无认知/无具身）；其价值是工具层工程（发现/契约/编排），不是架构。
+
+### Claude Code（MCP client + 工具元数据）
+
+- **MCP client 连接管理**：`connectToServer` memoize 并发去重、连接生命周期管理、运行时 `refreshTools()` 每轮把新连接 server 的工具纳入下一轮、工具命名 `mcp__<server>__<tool>`、权限走 `allowedMcpServers/deniedMcpServers`。→ rak-runtime 的 `mcp_client.py` 直接抄这套：并发去重连接 + 每轮刷新 + 命名空间 + server 级权限。
+- **工具一等对象元数据**（详见 01）：`isConcurrencySafe/isReadOnly/isDestructive/maxResultSizeChars/checkPermissions`——编排层只读元数据决定并发/沙箱/权限/结果预算。→ ToolDef registry 的字段集以此为蓝本。
+
+### CodeWhale（extensions/integrations）
+
+- **扩展插件面而非特判 core**：能力注册到通用插件面（hooks/工具/CLI 命令），core 保持窄腰。→ rak-runtime 的 ToolDef registry 就是"窄腰"，新能力走 registry + 目录，不硬编码进决策引擎。
+- **project overlay 只能收紧**：仓库内配置只能把权限/沙箱往更严方向移动，不能加凭据/放权。→ 设备 skill 自带配置只能收紧动作权限，不能放宽——物理安全不变量。
