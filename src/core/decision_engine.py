@@ -21,6 +21,8 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+from src.core._utils import thinking_extra
+
 # ========== 延迟初始化 ==========
 
 _memory_engine = None
@@ -604,7 +606,7 @@ def _llm_decide(system_prompt: str, user_message: str,
                     max_tokens=256,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_message}],
-                    extra_body={"thinking": {"type": "disabled"}},
+                    extra_body=thinking_extra(),
                 ) as stream:
                     accumulated = ""
                     for text_chunk in stream.text_stream:
@@ -683,7 +685,7 @@ def _llm_decompose(system_prompt: str, user_message: str,
                     max_tokens=1024,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_message}],
-                    extra_body={"thinking": {"type": "disabled"}},
+                    extra_body=thinking_extra(),
                 ) as stream:
                     accumulated = ""
                     for text_chunk in stream.text_stream:
@@ -1642,7 +1644,7 @@ class DecisionEngine:
                     max_tokens=128,
                     system="你是 Rak，一个温暖的智能家居助手。用自然的中文简短回复。",
                     messages=[{"role": "user", "content": prompt}],
-                    extra_body={"thinking": {"type": "disabled"}},
+                    extra_body=thinking_extra(),
                 )
                 for block in response.content:
                     if hasattr(block, "text"):

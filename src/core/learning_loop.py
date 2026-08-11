@@ -28,6 +28,8 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+from src.core._utils import thinking_extra
+
 
 @dataclass
 class ExecutionRecord:
@@ -349,7 +351,7 @@ class LearningLoop:
                 max_tokens=256,
                 system="你是学习模块。简洁分析，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=thinking_extra(),
             )
 
             text = ""
@@ -419,7 +421,7 @@ class LearningLoop:
                 max_tokens=256,
                 system="你是学习模块。从对比中提取规则，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=thinking_extra(),
             )
 
             text = ""
@@ -518,7 +520,7 @@ class LearningLoop:
                 max_tokens=256,
                 system="你是记忆管理模块。决定保留什么、归档什么、丢弃什么。输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=thinking_extra(),
             )
 
             text = ""

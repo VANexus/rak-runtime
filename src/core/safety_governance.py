@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+from src.core._utils import thinking_extra
+
 
 @dataclass
 class SafetyViolation:
@@ -79,7 +81,7 @@ class SafetyGovernance:
                 max_tokens=128,
                 system="你是安全评估模块。根据上下文判断操作是否安全。只输出 JSON。",
                 messages=[{"role": "user", "content": context}],
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=thinking_extra(),
             )
 
             text = ""

@@ -121,24 +121,45 @@ def get_model() -> str:
     return os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
 
 
+def resolve_llm_env() -> tuple:
+    """
+    解析 LLM 认证配置，返回 (key, base_url, auth_scheme)。
+
+    兼容两种 key 约定：
+    - ANTHROPIC_AUTH_TOKEN（token-plan 等代理）
+    - LONGCAT_API_KEY（LongCat 官方 CLI 约定）→ 自动用 LongCat base + Bearer
+    """
+    key = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LONGCAT_API_KEY") or ""
+    base = os.getenv("ANTHROPIC_BASE_URL") or ""
+    scheme = os.getenv("ANTHROPIC_AUTH_SCHEME") or ""
+
+    if not base:
+        # 用了 LongCat key 且未显式指定 base → 默认 LongCat
+        if os.getenv("LONGCAT_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN"):
+            base = "https://api.longcat.chat/anthropic"
+        else:
+            base = "https://token-plan-cn.xiaomimimo.com/anthropic"
+
+    if not scheme and "longcat" in base:
+        scheme = "bearer"  # LongCat 只认 Authorization: Bearer
+    if not scheme:
+        scheme = "api_key"
+
+    return key, base, scheme
+
+
 def make_llm_client(timeout: float = 15.0):
     """
     创建 Anthropic 客户端（统一工厂）。
 
-    支持两种鉴权方式（由 ANTHROPIC_AUTH_SCHEME 决定）：
-    - api_key（默认）：发 x-api-key 头（token-plan 代理）
+    支持两种鉴权方式（由 resolve_llm_env 决定）：
+    - api_key：发 x-api-key 头（token-plan 代理）
     - bearer：发 Authorization: Bearer 头（LongCat 等代理）
     """
     import anthropic
-    kwargs = dict(
-        base_url=os.getenv(
-            "ANTHROPIC_BASE_URL",
-            "https://token-plan-cn.xiaomimimo.com/anthropic",
-        ),
-        timeout=timeout,
-    )
-    key = os.getenv("ANTHROPIC_AUTH_TOKEN")
-    if os.getenv("ANTHROPIC_AUTH_SCHEME", "api_key") == "bearer":
+    key, base, scheme = resolve_llm_env()
+    kwargs = dict(base_url=base, timeout=timeout)
+    if scheme == "bearer":
         kwargs["auth_token"] = key
     else:
         kwargs["api_key"] = key
@@ -153,18 +174,17 @@ def make_langchain_anthropic(model: str, timeout: float = 30.0, max_tokens: int 
     bearer 鉴权通过 default_headers 注入 Authorization 头实现。
     """
     from langchain_anthropic import ChatAnthropic
-    kwargs = dict(
-        model=model,
-        base_url=os.getenv(
-            "ANTHROPIC_BASE_URL",
-            "https://token-plan-cn.xiaomimimo.com/anthropic",
-        ),
-        timeout=timeout,
-        max_tokens=max_tokens,
-    )
-    key = os.getenv("ANTHROPIC_AUTH_TOKEN")
-    if os.getenv("ANTHROPIC_AUTH_SCHEME", "api_key") == "bearer":
+    key, base, scheme = resolve_llm_env()
+    kwargs = dict(model=model, base_url=base, timeout=timeout, max_tokens=max_tokens)
+    if scheme == "bearer":
         kwargs["default_headers"] = {"Authorization": f"Bearer {key}"}
     else:
         kwargs["api_key"] = key
     return ChatAnthropic(**kwargs)
+
+
+def thinking_extra() -> dict:
+    """LLM 调用的 thinking 参数（RAK_THINKING=1 启用深思，默认关=快速 JSON 决策）"""
+    if os.getenv("RAK_THINKING", "0") == "1":
+        return {"thinking": {"type": "enabled"}}
+    return {"thinking": {"type": "disabled"}}

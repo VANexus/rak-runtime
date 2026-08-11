@@ -196,7 +196,9 @@ python test_e2e_full.py              # 端到端全链路测试
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic API Key | — |
 | `ANTHROPIC_BASE_URL` | API 代理地址 | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `ANTHROPIC_MODEL` | 模型名 | `mimo-v2.5-pro` |
-| `ANTHROPIC_AUTH_SCHEME` | 鉴权方式：`api_key`(x-api-key) / `bearer`(Authorization) | `api_key` |
+| `ANTHROPIC_AUTH_SCHEME` | 鉴权方式：`api_key`(x-api-key) / `bearer`(Authorization) | 自动（LongCat=bearer） |
+| `LONGCAT_API_KEY` | LongCat API Key（`ANTHROPIC_AUTH_TOKEN` 的便捷别名，自动切 LongCat base+Bearer） | — |
+| `RAK_THINKING` | 启用 LLM 深思（thinking），`1`=开，默认关（快速 JSON 决策） | `0` |
 | `RAK_AGENT` | 启用 LangGraph agent 内核（深思路径） | `1` |
 | `RAK_REFLEX` | 启用基底神经节反射弧（需训练） | `0` |
 | `RAK_AGENTIC_RAG` | 启用 Agentic RAG 多跳检索 | `0` |

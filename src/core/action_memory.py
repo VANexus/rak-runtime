@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+from src.core._utils import thinking_extra
+
 
 @dataclass
 class ActionTrajectory:
@@ -198,7 +200,7 @@ class ActionMemory:
                 max_tokens=128,
                 system="你是决策重放评估模块。判断历史决策是否可以直接重用。只输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=thinking_extra(),
             )
 
             text = ""

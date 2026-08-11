@@ -131,7 +131,7 @@ def generate_user_turns(llm_client, day, turn_in_day, recent_history, user_state
             max_tokens=1024,
             system="你是一个对话数据生成器。只输出用户说的话，不要编号以外的任何内容。",
             messages=[{"role": "user", "content": prompt}],
-            extra_body={"thinking": {"type": "disabled"}},
+            extra_body=thinking_extra(),
         )
 
         text = ""
