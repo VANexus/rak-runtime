@@ -55,7 +55,7 @@ class TestFastMCPServer:
         """权限 deny 的动作不执行，返回 denied"""
         from src.core.permissions import PermissionPolicy
         p = PermissionPolicy({"actions": {"light_on": "deny"}})
-        monkeypatch.setattr("src.mcp.fastmcp_server.get_permission_policy", lambda: p)
+        monkeypatch.setattr("src.core.permissions.get_permission_policy", lambda: p)
         mcp = create_mcp_server()
         text = _text(_call_tool(mcp, "execute_action", {"action": "light_on"}))
         assert '"status": "denied"' in text
@@ -64,7 +64,7 @@ class TestFastMCPServer:
         """权限 ask 的动作返回需确认"""
         from src.core.permissions import PermissionPolicy
         p = PermissionPolicy({"actions": {"light_on": "ask"}})
-        monkeypatch.setattr("src.mcp.fastmcp_server.get_permission_policy", lambda: p)
+        monkeypatch.setattr("src.core.permissions.get_permission_policy", lambda: p)
         mcp = create_mcp_server()
         text = _text(_call_tool(mcp, "execute_action", {"action": "light_on"}))
         assert '"status": "needs_confirmation"' in text
@@ -73,7 +73,7 @@ class TestFastMCPServer:
         """emergency_stop 永远放行（即使配置 deny）"""
         from src.core.permissions import PermissionPolicy
         p = PermissionPolicy({"actions": {"emergency_stop": "deny"}})
-        monkeypatch.setattr("src.mcp.fastmcp_server.get_permission_policy", lambda: p)
+        monkeypatch.setattr("src.core.permissions.get_permission_policy", lambda: p)
         mcp = create_mcp_server()
         text = _text(_call_tool(mcp, "execute_action", {"action": "emergency_stop"}))
         assert "decision" in text  # 走正常执行路径
