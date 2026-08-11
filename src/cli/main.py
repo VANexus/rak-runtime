@@ -36,10 +36,10 @@ AVAILABLE_ACTIONS = [
 ]
 
 BANNER = """
-[bold cyan]╔══════════════════════════════════════════════╗
-║        Rak 具身智能大脑 · 交互终端              ║
-╚══════════════════════════════════════════════╝[/]
-输入指令或问题开始对话。输入 [bold]/help[/] 查看命令，[/]Ctrl+C[/] 退出。
+══════════════════════════════════════════════
+      Rak 具身智能大脑 · 交互终端
+══════════════════════════════════════════════
+输入指令或问题开始对话。/help 查看命令，Ctrl+C 退出。
 """
 
 
@@ -244,7 +244,7 @@ def _help():
 
 
 def repl() -> None:
-    console.print(Panel(BANNER, border_style="cyan"))
+    console.print(Text(BANNER, style="bold cyan"))
     console.print("[dim]启动认知模块...[/]")
     from src.core import decision_engine as de
     de.DecisionEngine()
