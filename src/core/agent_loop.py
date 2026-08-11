@@ -14,6 +14,8 @@ Agentic 内核 — LangGraph ReAct 工具调用循环。
 import json
 import logging
 import os
+import time
+from functools import wraps
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -22,12 +24,34 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
+from src.core.hooks import (
+    get_hooks, PRE_TOOL_USE, POST_TOOL_USE, SESSION_START, SESSION_END,
+)
+
+
+def _mk_tool(fn, name: str):
+    """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE（异常不阻断，降级原则）"""
+    @tool
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        get_hooks().fire(PRE_TOOL_USE, tool=name)
+        t0 = time.time()
+        try:
+            result = fn(*args, **kwargs)
+            status = "ok"
+        except Exception as e:
+            result, status = str(e), "error"
+        get_hooks().fire(POST_TOOL_USE, tool=name,
+                         result=str(result)[:200], status=status,
+                         duration_ms=(time.time() - t0) * 1000)
+        return result
+    return wrapped
+
 
 def _build_tools(available_actions: list, system_prompt: str):
-    """构建认知工具集 + 决策容器"""
+    """构建认知工具集（钩子包装）+ 决策容器"""
     decision: dict = {}
 
-    @tool
     def search_memory(query: str, top_k: int = 5) -> str:
         """搜索记忆系统，查找相关经验、知识或历史事件。"""
         from src.core import decision_engine as de
@@ -40,7 +64,6 @@ def _build_tools(available_actions: list, system_prompt: str):
             for r in results
         ], ensure_ascii=False)[:500]
 
-    @tool
     def query_device(device_id: str = "") -> str:
         """查询设备当前状态和能力。"""
         from src.core import decision_engine as de
@@ -57,14 +80,12 @@ def _build_tools(available_actions: list, system_prompt: str):
             return f"设备 {device_id} 未知"
         return wm.format_device_state()[:500]
 
-    @tool
     def get_emotion() -> str:
         """查询大脑当前情绪状态。"""
         from src.core import decision_engine as de
         emo = de._get_emotion_engine()
         return emo.state.describe() if emo else "（情绪引擎不可用）"
 
-    @tool
     def get_needs() -> str:
         """查询大脑当前内部需求。"""
         from src.core import decision_engine as de
@@ -74,7 +95,6 @@ def _build_tools(available_actions: list, system_prompt: str):
             return need.needs.describe()
         return "（需求引擎不可用）"
 
-    @tool
     def reflect() -> str:
         """触发元认知自我反思，返回洞察。"""
         from src.core import decision_engine as de
@@ -83,7 +103,6 @@ def _build_tools(available_actions: list, system_prompt: str):
             return "（元认知不可用）"
         return json.dumps(meta.reflect(), ensure_ascii=False)[:500]
 
-    @tool
     def finalize(action: str, params_json: str, answer: str) -> str:
         """完成决策：记录最终选定的动作、参数 JSON 与对用户的回复。必须在最后调用。"""
         decision["action"] = action
@@ -91,8 +110,14 @@ def _build_tools(available_actions: list, system_prompt: str):
         decision["answer"] = answer
         return "决策已记录"
 
-    return [search_memory, query_device, get_emotion, get_needs,
-            reflect, finalize], decision
+    return [
+        _mk_tool(search_memory, "search_memory"),
+        _mk_tool(query_device, "query_device"),
+        _mk_tool(get_emotion, "get_emotion"),
+        _mk_tool(get_needs, "get_needs"),
+        _mk_tool(reflect, "reflect"),
+        _mk_tool(finalize, "finalize"),
+    ], decision
 
 
 def run_agent(user_msg: str, available_actions: list,
@@ -104,6 +129,8 @@ def run_agent(user_msg: str, available_actions: list,
     """
     if not available_actions:
         return None
+    session_id = f"agent-{int(time.time() * 1000)}"
+    get_hooks().fire(SESSION_START, session_id=session_id)
     try:
         from src.core._utils import make_langchain_anthropic
         model = make_langchain_anthropic(
@@ -150,4 +177,6 @@ def run_agent(user_msg: str, available_actions: list,
         logger.info("[AgentLoop] 模型未调用 finalize，轨迹: %s", trace)
     except Exception as e:
         logger.warning("[AgentLoop] 失败（降级单发决策）: %s", e)
+    finally:
+        get_hooks().fire(SESSION_END, session_id=session_id)
     return None
