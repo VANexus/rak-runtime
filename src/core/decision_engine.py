@@ -1536,6 +1536,16 @@ class DecisionEngine:
         result = "\n".join(parts)
         if result:
             logger.info("[Memory] 注入记忆上下文到 prompt")
+        # 上下文压缩（G2）：记忆上下文超预算时结构化压缩，防上下文腐烂
+        budget = int(os.getenv("RAK_MEMORY_BUDGET", "3000"))
+        if len(result) > budget:
+            try:
+                from src.core.compaction import compact_context
+                compacted = compact_context(result, max_chars=budget)
+                if compacted:
+                    result = compacted
+            except Exception as e:
+                logger.warning("[Memory] 上下文压缩失败（保持原文）: %s", e)
         return result
 
     # ========== 学习闭环 ==========
