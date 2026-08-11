@@ -116,6 +116,11 @@ def time_diff_minutes(time_str: str) -> float:
         return 0.0
 
 
+def get_model() -> str:
+    """当前 LLM 模型名（ANTHROPIC_MODEL env，默认 mimo-v2.5-pro）"""
+    return os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
+
+
 def make_llm_client(timeout: float = 15.0):
     """
     创建 Anthropic 客户端（统一工厂）。

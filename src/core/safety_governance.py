@@ -16,6 +16,7 @@ LLM 评估的维度：
 """
 
 import json
+import os
 import logging
 import time
 from typing import Dict, List, Optional, Tuple
@@ -74,7 +75,7 @@ class SafetyGovernance:
 
         try:
             response = llm.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=128,
                 system="你是安全评估模块。根据上下文判断操作是否安全。只输出 JSON。",
                 messages=[{"role": "user", "content": context}],

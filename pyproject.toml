@@ -39,6 +39,9 @@ dependencies = [
     # 安装方式：uv pip install psycopg2-binary redis
 ]
 
+[project.scripts]
+rak = "src.cli.main:main"
+
 [tool.uv.extra-build-dependencies]
 openai-whisper = ["setuptools<60.0.0", "wheel"]
 

@@ -18,6 +18,7 @@
 """
 
 import json
+import os
 import logging
 import threading
 import time
@@ -344,7 +345,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=256,
                 system="你是学习模块。简洁分析，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -414,7 +415,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=256,
                 system="你是学习模块。从对比中提取规则，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -513,7 +514,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=256,
                 system="你是记忆管理模块。决定保留什么、归档什么、丢弃什么。输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],

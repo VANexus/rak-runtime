@@ -14,6 +14,7 @@ Action Memory: 动作记忆 + Record-and-Replay
 """
 
 import json
+import os
 import logging
 import os
 import time
@@ -193,7 +194,7 @@ class ActionMemory:
 
         try:
             response = llm.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=128,
                 system="你是决策重放评估模块。判断历史决策是否可以直接重用。只输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],

@@ -20,6 +20,7 @@
 """
 
 import logging
+import os
 import time
 from typing import List, Dict, Optional, Callable
 from dataclasses import dataclass
@@ -272,7 +273,7 @@ class SleepConsolidation:
 请用一句话总结最重要的经验教训。"""
 
             response = self.llm_client.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}],
             )

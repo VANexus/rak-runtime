@@ -12,6 +12,7 @@
 """
 
 import json
+import os
 import logging
 import os
 import threading
@@ -1637,7 +1638,7 @@ class DecisionEngine:
 不要说"我无法执行"，而是像朋友一样回应。"""
 
                 response = llm.messages.create(
-                    model="mimo-v2.5-pro",
+                    model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                     max_tokens=128,
                     system="你是 Rak，一个温暖的智能家居助手。用自然的中文简短回复。",
                     messages=[{"role": "user", "content": prompt}],

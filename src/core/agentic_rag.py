@@ -14,6 +14,7 @@ Agentic RAG — 多跳检索推理引擎
 """
 
 import json
+import os
 import logging
 import time
 from typing import List, Dict, Optional, Any, Callable
@@ -347,7 +348,7 @@ class AgenticRAGWithLLM(AgenticRAG):
 }}"""
 
             response = self.llm_client.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -384,7 +385,7 @@ class AgenticRAGWithLLM(AgenticRAG):
             evidence_text = "\n".join(f"[{i+1}] {ev}" for i, ev in enumerate(evidence[:10]))
 
             response = self.llm_client.messages.create(
-                model="mimo-v2.5-pro",
+                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
                 max_tokens=256,
                 messages=[{
                     "role": "user",
