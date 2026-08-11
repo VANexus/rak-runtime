@@ -209,6 +209,19 @@ python test_e2e_full.py              # 端到端全链路测试
 | `MQTT_BROKER_PORT` | MQTT Broker 端口 | `1883` |
 | `PERSONAPLEX_SERVER` | PersonaPlex WebSocket | `ws://8.129.26.180:8998/ws` |
 
+## 交互终端（CLI / TUI）
+
+像 Claude Code / openclaw 一样直接跟大脑对话：
+
+```bash
+./bin/rak                    # 交互式 REPL（Rich TUI）
+./bin/rak ask "把灯打开"     # 一次性决策
+./bin/rak status             # 认知系统状态
+```
+
+REPL 内：输入指令/问题 → 大脑决策（自然回复 + 动作 + 工具轨迹 + 认知状态）；斜杠命令 `/status` `/emotion` `/needs` `/memory <q>` `/reflect` `/self` `/sessions` `/help` `/exit`。
+`RAK_OUTBOUND=1` 时决策的设备动作会真实派发到硬件（MQTT/A2A）。
+
 ## 多协议接入
 
 大脑支持三种接入方式，可同时运行：

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Rak 大脑 CLI 启动器 — 自动使用项目 venv（无需手动激活）
+# 用法：./bin/rak              # 交互式 REPL
+#       ./bin/rak ask "指令"   # 一次性决策
+#       ./bin/rak status       # 认知状态
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$DIR/.venv/bin/python"
+
+if [ ! -x "$PY" ]; then
+  echo "✗ 未找到项目虚拟环境 $PY" >&2
+  echo "  请先创建：cd $DIR && uv venv --python 3.14 && uv pip install -r requirements.txt" >&2
+  exit 1
+fi
+
+cd "$DIR"
+exec "$PY" -m src.cli.main "$@"
