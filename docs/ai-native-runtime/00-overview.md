@@ -42,6 +42,7 @@ rak-runtime 不是纯编码工具（Claude Code / OpenCode），但**内核要�
 | 06 | `embodied-brain.md` | 具身层：仿生认知、心跳、主动性、硬件驱动 | ✅ |
 | 07 | `evolution.md` | 学习与自进化：反思、技能沉淀、策略自适应 | ✅ |
 | 08 | `roadmap.md` | 差距清单 + 分阶段实施路线（从当前代码库出发） | ✅ |
+| 09 | `prompts.md` | 内置提示词设计：人格/决策/分解/RAG/agent 内核 | ✅ |
 
 ## 分析来源
 

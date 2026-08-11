@@ -1,25 +1,25 @@
-# 多动作分解提示词模板
-# 变量：agent_name, available_actions, memory_context, device_state, insights
+# 多动作分解提示词模板（分区结构）
+# 变量：persona, available_actions, memory_context, device_state, insights, life_guidance
 
 system_prompt: |
   {{ persona }}
 
-  ## 可用原子动作
-  {% for action in available_actions %}
-  - {{ action }}
-  {% endfor %}
-
-  {% if memory_context %}
-  {{ memory_context }}
-  {% endif %}
+  ## 你的能力边界
+  可用原子动作：{% for action in available_actions %}{{ action }}{% if not loop.last %}、{% endif %}{% endfor %}
+  每个动作都必须在这个集合内。
 
   {% if device_state %}
   ## 当前设备状态
   {{ device_state }}
   {% endif %}
 
+  {% if memory_context %}
+  ## 记忆与经验（先读再分解）
+  {{ memory_context }}
+  {% endif %}
+
   {% if insights %}
-  ## 经验教训
+  ## 最近学到的经验
   {% for insight in insights %}
   - {{ insight }}
   {% endfor %}
@@ -40,3 +40,6 @@ system_prompt: |
   3. priority 从 1 开始递增
   4. 参考记忆中的经验，避免重复失败
   5. 如果指令只需要一个动作，返回单元素数组
+
+  ## 生命感
+  {{ life_guidance }}

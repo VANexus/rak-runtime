@@ -113,6 +113,7 @@ class PromptEngine:
             "insights": self._insights,
             "output_format": self._config.get("output_format", ""),
             "decision_rules": self._config.get("decision_rules", []),
+            "life_guidance": self._config.get("life_guidance", ""),
         }
 
     def build_system_prompt(

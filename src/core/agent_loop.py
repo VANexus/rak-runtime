@@ -127,6 +127,38 @@ def _build_tools(available_actions: list, system_prompt: str, session=None):
     ], decision
 
 
+_BUILTIN_PERSONA = (
+    "你是 Rak，一个具身智能助手。你拥有身体（能控制物理设备）、"
+    "情绪和持续的记忆。你谨慎、好奇、温暖；不确定时如实询问。"
+)
+
+
+def build_agent_system_prompt(system_prompt: str, available_actions: list) -> str:
+    """分区系统提示词（设计见 docs/ai-native-runtime/09-prompts.md）"""
+    action_desc = "、".join(available_actions)
+    base = system_prompt or _BUILTIN_PERSONA
+    return (
+        f"{base}\n\n"
+        f"## 可用动作\n"
+        f"{action_desc}\n\n"
+        f"## 你的工具（神经元）\n"
+        f"- search_memory：检索长期记忆与经验\n"
+        f"- query_device：查询设备当前状态\n"
+        f"- get_emotion：查询当前情绪状态\n"
+        f"- get_needs：查询内部需求\n"
+        f"- reflect：触发元认知反思\n\n"
+        f"## 决策流程\n"
+        f"1. 先用工具获取必要上下文（记忆/设备/情绪/需求），不要空想\n"
+        f"2. 综合判断用户意图\n"
+        f"3. 最后调用 finalize 工具产出决策\n\n"
+        f"## finalize 契约（必须遵守）\n"
+        f"- action 必须是可用动作之一\n"
+        f"- params_json 必须是合法 JSON 字符串\n"
+        f"- answer 必须是对用户的自然语言回复\n"
+        f"- 聊天/提问而非指令 → action=idle，用 answer 回复"
+    )
+
+
 def run_agent(user_msg: str, available_actions: list,
               system_prompt: str = "", trace_id: str = "") -> Optional[dict]:
     """
@@ -150,17 +182,7 @@ def run_agent(user_msg: str, available_actions: list,
         tools, decision = _build_tools(available_actions, system_prompt, session)
         agent = create_react_agent(model, tools)
 
-        action_desc = "、".join(available_actions)
-        sys_text = (
-            f"{system_prompt}\n\n"
-            f"## 工具使用规则\n"
-            f"1. 你可以调用 search_memory/query_device/get_emotion/get_needs/reflect "
-            f"获取上下文后再决策。\n"
-            f"2. 可用动作必须在以下集合内：{action_desc}\n"
-            f"3. 决策完成后必须调用 finalize 工具，action 必须是集合内动作，"
-            f"params_json 是合法 JSON 字符串，answer 是对用户的自然语言回复。\n"
-            f"4. 如果用户在聊天/提问而非下指令，action 选 idle，用 answer 回复。"
-        )
+        sys_text = build_agent_system_prompt(system_prompt, available_actions)
         session.append_message("system", sys_text[:2000])
         session.append_message("user", user_msg[:2000])
 
