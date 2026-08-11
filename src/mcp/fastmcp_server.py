@@ -41,6 +41,17 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool()
     def execute_action(action: str, device_id: str = "", params: dict | None = None) -> str:
         """执行一个原子动作。直接指定动作名和参数。"""
+        from src.core.permissions import get_permission_policy
+        # 权限门：设备动作需确认时返回确认，不直接执行（emergency_stop 永远放行）
+        decision = get_permission_policy().evaluate(action)
+        if decision.verdict == "deny":
+            return json.dumps({"action": action, "status": "denied",
+                               "reason": decision.reason}, ensure_ascii=False)
+        if decision.verdict == "ask":
+            return json.dumps({"action": action, "status": "needs_confirmation",
+                               "reason": decision.reason,
+                               "params": params or {}}, ensure_ascii=False)
+
         class MockRequest:
             def __init__(self):
                 self.trace_id = f"mcp_{json.dumps(params or {}, ensure_ascii=False)[:20]}"
