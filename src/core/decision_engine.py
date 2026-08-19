@@ -14,14 +14,13 @@
 import json
 import os
 import logging
-import os
 import threading
 import time
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-from src.core._utils import thinking_extra
+from src.core._utils import get_model, thinking_extra
 
 # ========== 延迟初始化 ==========
 
@@ -48,7 +47,21 @@ _proactive_engine = None
 _sleep_consolidation = None
 _policy_model = None
 _agentic_rag = None
+_super_memory = None
+_memory_graph = None
 _init_lock = threading.RLock()  # 可重入锁：_get_* 内部存在嵌套 _get_* 调用
+
+
+def _data_dir() -> str:
+    """
+    持久化数据目录的唯一事实源。
+
+    默认 <repo>/data；设 RAK_DATA_DIR 覆盖（实验隔离、容器卷挂载）。
+    所有 _get_* 单例的 persist 路径都从这里派生，确保 baseline 对比等
+    平行实验能用独立数据目录而不污染线上缓存/规则/记忆。
+    """
+    return os.environ.get("RAK_DATA_DIR") or os.path.join(
+        os.path.dirname(__file__), "..", "..", "data")
 
 
 def _get_memory_engine():
@@ -64,7 +77,7 @@ def _get_memory_engine():
             persistence = None
             try:
                 from src.core.memory_persistence import PrefChainPersistence
-                data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "memory")
+                data_dir = os.path.join(_data_dir(), "memory")
                 persistence = PrefChainPersistence(data_dir)
                 logger.info("持久化记忆管理器初始化成功（%s）", persistence.backend_name)
             except Exception as e:
@@ -124,7 +137,7 @@ def _get_semantic_cache():
             return _semantic_cache if _semantic_cache is not False else None
         try:
             from src.core.semantic_cache import SemanticCache
-            cache_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "semantic_cache.json")
+            cache_path = os.path.join(_data_dir(), "semantic_cache.json")
             _semantic_cache = SemanticCache(persist_path=cache_path)
             logger.info("语义缓存初始化成功")
         except Exception as e:
@@ -193,7 +206,7 @@ def _get_user_model():
             return _user_model if _user_model is not False else None
         try:
             from src.core.user_model import UserModel
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             persist_path = os.path.join(data_dir, "user_model.json")
             _user_model = UserModel(persist_path=persist_path)
@@ -213,7 +226,7 @@ def _get_self_model():
             return _self_model if _self_model is not False else None
         try:
             from src.core.self_model import SelfModel
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             persist_path = os.path.join(data_dir, "self_model.json")
             _self_model = SelfModel.load(persist_path)
@@ -288,7 +301,7 @@ def _get_living_graph():
             return _living_graph if _living_graph is not False else None
         try:
             from src.core.living_graph import LivingGraph
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             persist_path = os.path.join(data_dir, "living_graph.json")
             _living_graph = LivingGraph(persist_path=persist_path)
@@ -342,7 +355,7 @@ def _get_cog_rec():
             return _cog_rec if _cog_rec is not False else None
         try:
             from src.core.cog_rec import CogRecEngine
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             _cog_rec = CogRecEngine(persist_path=os.path.join(data_dir, "cogrec_rules.json"))
             logger.info("CogRec 引擎初始化成功")
@@ -361,7 +374,7 @@ def _get_action_memory():
             return _action_memory if _action_memory is not False else None
         try:
             from src.core.action_memory import ActionMemory
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             _action_memory = ActionMemory(persist_path=os.path.join(data_dir, "action_memory.json"))
             logger.info("动作记忆初始化成功")
@@ -380,7 +393,7 @@ def _get_prompt_evolution():
             return _prompt_evolution if _prompt_evolution is not False else None
         try:
             from src.core.prompt_evolution import PromptEvolution
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            data_dir = _data_dir()
             os.makedirs(data_dir, exist_ok=True)
             _prompt_evolution = PromptEvolution(persist_path=os.path.join(data_dir, "prompt_evolution.json"))
             logger.info("提示词进化引擎初始化成功")
@@ -515,6 +528,42 @@ def _get_agentic_rag():
     return _agentic_rag if _agentic_rag is not False else None
 
 
+def _get_super_memory():
+    """超长期记忆（幂等 + FTS5 + 记忆图）—— 只读引用，惰性初始化，失败不阻断"""
+    global _super_memory
+    if _super_memory is not None:
+        return _super_memory if _super_memory is not False else None
+    with _init_lock:
+        if _super_memory is not None:
+            return _super_memory if _super_memory is not False else None
+        try:
+            from src.core.memory_longterm import get_super_memory
+            _super_memory = get_super_memory()
+            logger.info("超长期记忆已接线")
+        except Exception as e:
+            logger.warning("超长期记忆初始化失败: %s", e)
+            _super_memory = False
+    return _super_memory if _super_memory is not False else None
+
+
+def _get_memory_graph():
+    """记忆即图（多跳扩散召回 + 路径发现）—— 构建在超长期记忆之上"""
+    global _memory_graph
+    if _memory_graph is not None:
+        return _memory_graph if _memory_graph is not False else None
+    with _init_lock:
+        if _memory_graph is not None:
+            return _memory_graph if _memory_graph is not False else None
+        try:
+            from src.core.memory_graph import get_memory_graph
+            _memory_graph = get_memory_graph()
+            logger.info("记忆图谱已接线")
+        except Exception as e:
+            logger.warning("记忆图谱初始化失败: %s", e)
+            _memory_graph = False
+    return _memory_graph if _memory_graph is not False else None
+
+
 def _wire_cognitive_graph():
     """
     统一认知图：把真实依赖注入 InnerLoop / ProactiveEngine / MemoryStream。
@@ -592,7 +641,7 @@ def _llm_decide(system_prompt: str, user_message: str,
     if client is None:
         return None
 
-    model = os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
+    model = get_model()
 
     for attempt in range(max_retries + 1):
         result = [None]
@@ -671,7 +720,7 @@ def _llm_decompose(system_prompt: str, user_message: str,
     if client is None:
         return None
 
-    model = os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
+    model = get_model()
 
     for attempt in range(max_retries + 1):
         result = [None]
@@ -834,7 +883,11 @@ class DecisionEngine:
             if cached:
                 cache_hit = True
                 cache_similarity = cached.get("_similarity", 0.0)
-                logger.info("[TraceID: %s] 语义缓存命中: %s", trace_id, cached['action'])
+                # 改写命中：Dice 层已校验（阈值 + 意图类别守卫），视为语义确认，
+                # 直接走快通道返回——否则会被元认知低置信度丢回 LLM，快通道失效。
+                cache_is_paraphrase = "_para_similarity" in cached
+                logger.info("[TraceID: %s] 语义缓存命中: %s%s", trace_id, cached['action'],
+                            "（改写层确认）" if cache_is_paraphrase else "")
 
                 # 元认知评估：缓存命中但也要检查置信度
                 meta = _get_meta_cognition()
@@ -843,12 +896,14 @@ class DecisionEngine:
                         query=query,
                         cache_hit=True,
                         cache_similarity=cache_similarity,
+                        cache_is_paraphrase=cache_is_paraphrase,
                     )
-                    if assessment.should_confirm:
-                        # 缓存命中但置信度低（可能是语义匹配但不精确）
+                    if assessment.should_confirm and not cache_is_paraphrase:
+                        # 缓存命中但置信度低（可能是语义匹配但不精确）——仅对非改写
+                        # 的弱余弦命中才继续深思；改写命中已过守卫，直接采用。
                         logger.info("[TraceID: %s] 缓存命中但置信度低 (%s)，继续深思", trace_id, assessment.score)
                     else:
-                        # 高置信度缓存命中
+                        # 高置信度缓存命中（含改写层确认的命中）
                         result = {"status": "ok", **cached}
                         self._record_to_user_model(query, cached.get("action", ""), trace_id)
                         self._record_feedback(trace_id, query, result, True)
@@ -972,6 +1027,10 @@ class DecisionEngine:
 
         # ── 步骤 5: 构建提示词（记忆 + 用户画像 + 自我 + 情绪 + 纠正）──
         prompt_engine = _get_prompt_engine()
+        # state 字段被重载：go-kernel 传设备状态 JSON；CLI/A2A/benchmark 传用户
+        # 自然语言指令。只有真实设备状态才渲染进"当前设备状态"，否则模型会把
+        # 用户指令误读成设备状态报告。
+        device_state = request.state if self._looks_like_device_state(request.state) else ""
         if prompt_engine:
             extra_context = ""
             if user_profile_summary:
@@ -984,7 +1043,7 @@ class DecisionEngine:
             system_prompt = prompt_engine.build_system_prompt(
                 available_actions=available_actions,
                 memory_context=memory_context + extra_context,
-                device_state=request.state or "",
+                device_state=device_state,
             )
         else:
             system_prompt = self._build_fallback_prompt(available_actions)
@@ -997,7 +1056,9 @@ class DecisionEngine:
         if request.action:
             user_msg = f"执行动作: {request.action}, 参数: {request.params_json or '{}'}"
         else:
-            user_msg = f"状态: {request.state or '未知'}"
+            # state 是用户自然语言指令（CLI/A2A/benchmark 均如此传）——
+            # 必须明示是"用户说"，否则模型会把指令误读成设备状态报告
+            user_msg = f"用户说: {request.state or '（无输入）'}"
 
         # ── 步骤 7: 深思（agent 内核，降级单发 JSON） ─────
         llm_result = self._agent_decide(query, available_actions, system_prompt,
@@ -1064,6 +1125,12 @@ class DecisionEngine:
                 # idle 不能沉默——必须回复用户
                 result["answer"] = self._generate_idle_response(query, memory_context)
 
+            # 透传 agent 内核的工具轨迹（供 benchmark 度量工具效率 / 诊断）
+            if llm_result.get("trace"):
+                result["trace"] = llm_result["trace"]
+            if llm_result.get("session_id"):
+                result["session_id"] = llm_result["session_id"]
+
             # 注入置信度提示
             if meta:
                 hint = meta.format_confidence_hint(assessment)
@@ -1103,25 +1170,35 @@ class DecisionEngine:
             if cognitive:
                 result["cognitive_state"] = cognitive
 
-            # 存入语义缓存
+            # 存入语义缓存（防污染：动作指令却回 idle 的失败决策不缓存）
             if cache and query:
-                cache.store(query, result, available_actions)
+                if chosen == "idle" and self._is_action_command(query):
+                    logger.info("[Cache] 动作指令回 idle，跳过缓存（防污染）: %s", query[:30])
+                else:
+                    cache.store(query, result, available_actions)
+
+            # 决策质量门：动作指令却回 idle = 失败决策（LLM 误判），
+            # 不学习规则/不缓存/不记成功 —— 否则一次误判会被 CogRec/ActionMemory
+            # 固化成规则，永久污染快速通道。
+            decision_ok = not (chosen == "idle" and self._is_action_command(query))
+            if not decision_ok:
+                logger.info("[Decision] 动作指令回 idle（%s），视为失败，跳过学习/缓存",
+                            query[:30])
 
             # 记录到记忆 + 学习闭环 + 用户模型
             self._store_decision_memory(trace_id, request, result, memory_context)
-            self._record_feedback(trace_id, query, result, True)
+            self._record_feedback(trace_id, query, result, decision_ok)
             self._record_to_user_model(query, chosen, trace_id)
 
-            # 记录到新模块
-            self._record_to_new_modules(query, chosen, True)
+            # 记录到新模块（成功/失败按真实质量）
+            self._record_to_new_modules(query, chosen, decision_ok)
 
-            # CogRec: 从 LLM 成功中学习规则
-            if cog_rec and query and chosen:
+            # CogRec / ActionMemory / PromptEvolution：仅有效决策才学习
+            if cog_rec and query and chosen and decision_ok:
                 cog_rec.learn_from_success(query, chosen, llm_result.get("params_json", "{}"),
                                           answer=llm_result.get("answer", ""))
 
-            # ActionMemory: 记录成功轨迹
-            if action_mem and query and chosen:
+            if action_mem and query and chosen and decision_ok:
                 action_mem.record(
                     query=query, action=chosen,
                     params_json=llm_result.get("params_json", "{}"),
@@ -1129,9 +1206,11 @@ class DecisionEngine:
                     result=result,
                 )
 
-            # PromptEvolution: 成功反馈
             if prompt_evo and query:
-                prompt_evo.on_success(query)
+                if decision_ok:
+                    prompt_evo.on_success(query)
+                else:
+                    prompt_evo.on_failure(query)
 
             # 记录助手回复到对话状态
             self._record_assistant_response(conv, chosen)
@@ -1215,7 +1294,10 @@ class DecisionEngine:
                 logger.info("[TraceID: %s] LLM 分解完成: %s 个动作", trace_id, len(valid))
                 self._store_text_decision_memory(trace_id, text, valid, True, memory_context)
                 self._record_to_user_model(text, valid[0].get("action", ""), trace_id)
-                return {"status": "ok", "asr_text": text, "actions": valid}
+                result = {"status": "ok", "asr_text": text, "actions": valid,
+                          "action": self._primary_action(valid, available_actions)}
+                self._store_text_cache(text, result, available_actions)
+                return result
 
         # 规则兜底
         logger.info("[TraceID: %s] LLM 不可用，规则引擎兜底", trace_id)
@@ -1224,9 +1306,47 @@ class DecisionEngine:
         if rule_actions:
             self._record_to_user_model(text, rule_actions[0].get("action", ""), trace_id)
 
-        return {"status": "ok", "asr_text": text, "actions": rule_actions}
+        result = {"status": "ok", "asr_text": text, "actions": rule_actions,
+                  "action": self._primary_action(rule_actions, available_actions)}
+        self._store_text_cache(text, result, available_actions)
+        return result
 
     # ========== Agentic 深思（LangGraph 工具调用内核） ==========
+
+    def _primary_action(self, actions: list, available_actions: list) -> str:
+        """从分解动作列表中取『主动作』（第一个合法动作），用于补齐顶层 action 契约。
+
+        多动作路径（decide_from_text）历史只返回 actions 列表、无顶层 action，
+        导致下游 res.get("action") 为空（baseline 记为 '?'）、语义缓存落不实动作、
+        paraphrase 无法复用。这里取首个合法动作为顶层 action，保证与单动作路径
+        返回契约一致；无合法动作时安全降级 idle（若可用）。
+        """
+        for a in actions or []:
+            act = (a or {}).get("action", "")
+            if act in available_actions:
+                return act
+        return "idle" if "idle" in available_actions else (available_actions[0] if available_actions else "")
+
+    def _store_text_cache(self, text: str, result: dict, available_actions: list):
+        """把多动作/复合决策的顶层 action 落入语义缓存（修复复合路径的学习链盲区）。
+
+        历史：decide_from_text 只 lookup 不 store，复合 cold 决策永不缓存，
+        paraphrase 无法复用（baseline 3/6/9 未命中根因）。这里复用 decide() 的
+        防污染守门：动作指令若回 idle（顶层无实动作）则不缓存。
+        """
+        cache = _get_semantic_cache()
+        if not cache or not text:
+            return
+        chosen = result.get("action", "")
+        if chosen == "idle" and self._is_action_command(text):
+            logger.info("[Cache] 多动作决策回 idle，跳过缓存（防污染）: %s", text[:30])
+            return
+        if not chosen:
+            return
+        try:
+            cache.store(text, result, available_actions)
+        except Exception as e:
+            logger.warning("[Cache] 多动作决策缓存失败: %s", e)
 
     def _agent_decide(self, query: str, available_actions: list,
                       system_prompt: str, user_msg: str,
@@ -1251,6 +1371,8 @@ class DecisionEngine:
                 "action": result["action"],
                 "params_json": result.get("params_json", "{}"),
                 "answer": result.get("answer", ""),
+                "trace": result.get("trace", []),
+                "session_id": result.get("session_id", ""),
             }
         return _llm_decide(system_prompt, user_msg)
 
@@ -1306,6 +1428,25 @@ class DecisionEngine:
         if self_model:
             self_model.update_relationship("default_user", trust_delta=-0.05)
 
+        # 超长期记忆：纠正是最强的终身学习信号（幂等）
+        super_mem = _get_super_memory()
+        if super_mem:
+            try:
+                mem_id = super_mem.remember(
+                    content=f"纠正: '{original_query}' 应执行 {correct_action}，不是 {wrong_action}",
+                    memory_type="procedural", scope="default",
+                    importance=0.95,
+                    metadata={"type": "correction", "wrong": wrong_action,
+                              "correct": correct_action},
+                )
+                self._index_memory_graph(
+                    mem_id,
+                    f"纠正: '{original_query}' 应执行 {correct_action}，不是 {wrong_action}",
+                    scope="default",
+                )
+            except Exception as e:
+                logger.warning("[SuperMemory] 纠正记忆失败: %s", e)
+
         # 内心循环（事件驱动 — 会自动更新情绪和需求）
         inner = _get_inner_loop()
         if inner:
@@ -1325,6 +1466,18 @@ class DecisionEngine:
         inner = _get_inner_loop()
         if inner:
             inner.on_event("feedback", {"query": query, "feedback": feedback})
+
+    def _index_memory_graph(self, mem_id: str, content: str, scope: str = "default"):
+        """把超长期记忆注册进记忆图谱（索引节点，供多跳联想召回）"""
+        if not mem_id or not content:
+            return
+        graph = _get_memory_graph()
+        if graph is None:
+            return
+        try:
+            graph.index(mem_id, content, scope=scope)
+        except Exception as e:
+            logger.warning("[MemoryGraph] 节点索引失败: %s", e)
 
     def _record_to_new_modules(self, query: str, action: str, success: bool):
         """记录决策结果到新模块（事件驱动）"""
@@ -1519,6 +1672,40 @@ class DecisionEngine:
             if context:
                 parts.append(f"## 当前对话\n{context}")
 
+        # ── 通道 3: 超长期记忆（渐进披露 L1：只注入紧凑索引）──
+        super_mem = _get_super_memory()
+        if super_mem:
+            try:
+                scope = "default"
+                sm_hits = super_mem.recall(query, scope=scope, top_k=4)
+                if sm_hits:
+                    sm_lines = []
+                    for h in sm_hits:
+                        sm_lines.append(
+                            f"- [{h.memory_type}] ({h.importance:.1f}) {h.content}"
+                        )
+                    parts.append("## 超长期记忆（跨会话）\n" + "\n".join(sm_lines))
+                    logger.info("[SuperMemory] 注入 %d 条跨会话记忆", len(sm_hits))
+            except Exception as e:
+                logger.warning("[SuperMemory] 检索失败: %s", e)
+
+        # ── 通道 4: 记忆即图（多跳扩散召回，带联想路径）──
+        graph = _get_memory_graph()
+        if graph:
+            try:
+                g_hits = graph.query(query, scope="default", top_k=3, hops=2)
+                if g_hits:
+                    g_lines = []
+                    for g in g_hits:
+                        if len(g.path) > 1:
+                            g_lines.append(f"- [{g.memory_type}] {g.content}（联想: {'→'.join(g.path)}）")
+                        else:
+                            g_lines.append(f"- [{g.memory_type}] {g.content}")
+                    parts.append("## 记忆图谱联想\n" + "\n".join(g_lines))
+                    logger.info("[MemoryGraph] 注入 %d 条图谱联想", len(g_hits))
+            except Exception as e:
+                logger.warning("[MemoryGraph] 检索失败: %s", e)
+
         # Agentic RAG 多跳检索：知识问题 + 记忆稀疏 + RAK_AGENTIC_RAG=1
         if (os.getenv("RAK_AGENTIC_RAG", "0") == "1"
                 and self._is_knowledge_question(query)
@@ -1594,6 +1781,19 @@ class DecisionEngine:
                 trace_id=trace_id, action=action, success=success,
                 context=request.state or "", result=result.get("status", ""),
             )
+
+            # 同步写超长期记忆（幂等：同状态决策不重复落盘）+ 记忆图索引
+            super_mem = _get_super_memory()
+            if super_mem:
+                try:
+                    mem_id = super_mem.remember(
+                        content=content, memory_type="episodic", scope="default",
+                        importance=0.6 if success else 0.4,
+                        metadata={"trace_id": trace_id, "action": action, "success": success},
+                    )
+                    self._index_memory_graph(mem_id, content, scope="default")
+                except Exception as e:
+                    logger.warning("[SuperMemory] 存储失败: %s", e)
         except Exception as e:
             logger.warning("[Memory] 存储决策记忆失败: %s", e)
 
@@ -1616,6 +1816,19 @@ class DecisionEngine:
                 metadata={"trace_id": trace_id, "asr_text": text,
                           "actions": action_names, "llm_used": llm_used},
             )
+
+            super_mem = _get_super_memory()
+            if super_mem:
+                try:
+                    mem_id = super_mem.remember(
+                        content=content, memory_type="episodic", scope="default",
+                        importance=0.7,
+                        metadata={"trace_id": trace_id, "asr_text": text,
+                                  "actions": action_names, "llm_used": llm_used},
+                    )
+                    self._index_memory_graph(mem_id, content, scope="default")
+                except Exception as e:
+                    logger.warning("[SuperMemory] 存储文本记忆失败: %s", e)
         except Exception as e:
             logger.warning("[Memory] 存储文本记忆失败: %s", e)
 
@@ -1640,7 +1853,7 @@ class DecisionEngine:
 不要说"我无法执行"，而是像朋友一样回应。"""
 
                 response = llm.messages.create(
-                    model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                    model=get_model(),
                     max_tokens=128,
                     system="你是 Rak，一个温暖的智能家居助手。用自然的中文简短回复。",
                     messages=[{"role": "user", "content": prompt}],
@@ -1655,49 +1868,91 @@ class DecisionEngine:
         # 模板降级
         return "收到！有什么需要帮忙的随时说～"
 
+    def _looks_like_device_state(self, text: str) -> bool:
+        """state 是否为真实设备状态（go-kernel JSON），而非用户自然语言指令"""
+        if not text or not text.strip():
+            return False
+        stripped = text.strip()
+        if not (stripped.startswith("{") or stripped.startswith("[")):
+            return False
+        try:
+            data = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if isinstance(data, dict):
+            # 设备状态关键字段
+            if any(k in data for k in ("device_id", "online", "status",
+                                       "capabilities", "sensors", "position")):
+                return True
+        return False
+
+    def _is_action_command(self, text: str) -> bool:
+        """是否为动作指令（而非闲聊/提问）：含动作动词或设备名词。
+        用于缓存防污染 —— 动作指令却回 idle 是失败决策，不缓存。"""
+        markers = [
+            "开", "关", "打开", "关闭", "锁", "门", "灯", "前进", "后退",
+            "左转", "右转", "挥手", "招手", "点头", "摇头", "跳舞", "停",
+            "走", "转", "把", "来", "去",
+        ]
+        return any(m in text for m in markers)
+
+    _COMPOUND_VERB_STEMS = ["开", "关", "挥", "招", "点", "摇", "跳", "走", "转",
+                            "停", "前进", "后退", "锁", "舞", "来", "去"]
+
     def _is_compound_command(self, text: str) -> bool:
         """
         检测是否为复合指令。
 
         复合模式：
-        - "A 和 B"、"A 与 B"
-        - "先 A 再 B"、"先 A 然后 B"
+        - "A 和 B"、"A 并 B"、"A 且 B"
+        - "先 A 再 B"、"A 以后 B"
         - "A，然后 B"、"A，再 B"
         - "A，B"（逗号分隔的多个动作）
+        - 两个及以上动作动词词干（如"挥手并点头""跳完舞以后把灯关掉"）
         """
+        def _has_action(side: str) -> bool:
+            return any(v in side for v in self._COMPOUND_VERB_STEMS)
+
         compound_markers = [
-            " 和 ", " 与 ", "及",
-            "先", "然后", "再", "接着",
+            " 和 ", " 与 ", "及", "以及",
+            "并", "并且", "跟", "且",
+            "先", "然后", "再", "接着", "以后",
             "同时", "顺便", "还有",
         ]
 
-        # 检查是否有复合标记
+        # 检查是否有复合标记（且两侧都含动作动词，排除"我们以后再聊"这类闲聊）
         for marker in compound_markers:
             if marker in text:
-                # 确认标记两侧都有实质性内容（不是"先走了"这种）
                 parts = text.split(marker)
-                if len(parts) >= 2 and len(parts[0].strip()) > 1 and len(parts[1].strip()) > 1:
+                if len(parts) >= 2 and _has_action(parts[0]) and _has_action(parts[1]):
                     return True
 
         # 逗号分隔的多个动作指令
         if "，" in text:
             parts = text.split("，")
             if len(parts) >= 2:
-                # 检查每个部分是否包含动作关键词
-                action_words = ["开", "关", "锁", "打开", "关闭", "调", "设"]
-                action_count = sum(
-                    1 for p in parts
-                    if any(w in p for w in action_words)
-                )
+                action_count = sum(1 for p in parts if _has_action(p))
                 if action_count >= 2:
                     return True
+
+        # 动作动词词干计数：>=2 个不同动词 = 复合指令
+        found = {v for v in self._COMPOUND_VERB_STEMS if v in text}
+        if len(found) >= 2:
+            return True
 
         return False
 
     def _rule_decompose(self, text: str, available_actions: List[str]) -> List[dict]:
         keyword_map = {
             "开门": "lock_open", "开锁": "lock_open", "打开门": "lock_open",
+            "把门打开": "lock_open", "打开锁": "lock_open",
             "关门": "lock_close", "锁门": "lock_close", "关上门": "lock_close",
+            "把门锁上": "lock_close", "锁上": "lock_close",
+            "开灯": "light_on", "打开灯": "light_on", "把灯打开": "light_on",
+            "开一下灯": "light_on", "灯打开": "light_on",
+            "关灯": "light_off", "把灯关上": "light_off", "关一下灯": "light_off",
+            "把灯关掉": "light_off", "灯关掉": "light_off", "关掉灯": "light_off",
+            "跳舞": "dance", "跳个舞": "dance", "舞": "dance",
             "前进": "move_forward", "往前走": "move_forward", "向前": "move_forward",
             "后退": "move_back", "往后走": "move_back", "向后": "move_back",
             "左转": "turn_left", "向左转": "turn_left",
@@ -1730,8 +1985,10 @@ class DecisionEngine:
                     remaining = remaining.replace(kw, "", 1)
 
         if not actions and available_actions:
+            # 无可匹配关键词：宁可选 idle（安全无操作），不选任意首动作
+            chosen = "idle" if "idle" in available_actions else available_actions[0]
             actions.append({
-                "action": available_actions[0],
+                "action": chosen,
                 "params_json": "{}",
                 "priority": 2,
             })
