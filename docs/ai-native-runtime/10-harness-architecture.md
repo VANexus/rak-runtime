@@ -70,6 +70,9 @@
 3. **Review**：LLM 评估是否达成目标；不达 → 带反馈重新规划，只重跑失败步骤
 4. 会话经 `AgentSession`/`SessionStore` 持久化（可诊断/可重放）
 5. 任何环节异常降级，绝不抛出
+6. **工作流成果写入超长期记忆**（2026-08-20）：run_workflow 完成后把目标/状态/迭代/
+   完成步骤写入 SuperMemory（scope='workflow'，幂等 + 注册进记忆图谱）——未来跨会话
+   工作流可召回先例，贯通『工作流』与『超长期记忆』两主题。
 
 ## Benchmark（`src/harness/benchmark.py` + `benchmarks/`）
 
