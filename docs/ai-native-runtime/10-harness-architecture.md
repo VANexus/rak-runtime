@@ -73,6 +73,9 @@
 6. **工作流成果写入超长期记忆**（2026-08-20）：run_workflow 完成后把目标/状态/迭代/
    完成步骤写入 SuperMemory（scope='workflow'，幂等 + 注册进记忆图谱）——未来跨会话
    工作流可召回先例，贯通『工作流』与『超长期记忆』两主题。
+   **活体实证（LongCat-2.0）**：目标"给出三句温暖问候语（愿你开头）" → completed 1 轮
+   36.2s，评审通过，输出三句合规问候；`recall(scope='workflow')` 召回本工作流 + 历史
+   「让灯亮起来」先例（跨会话召回机制在真 LLM 下成立）。
 
 ## Benchmark（`src/harness/benchmark.py` + `benchmarks/`）
 
