@@ -234,7 +234,8 @@
     input_schema、权限门 deny 跳过、降级不抛），仅当 `RAK_MCP_SERVERS` 配置时启用；
     `build_agent_system_prompt` 同步列出外部工具段。→ LangGraph ReAct 深思时能**真调用
     外部工具服务器**（离线实证 `mcp_stub_square.invoke({"kwargs_json":"{\"n\":6}"})`=36）。
-  - 全量 **282 passed / 1 skipped**（+3：外部工具物化、未配置不物化、提示词列出）。
+  - 全量 **293 passed / 1 skipped**（+外部工具 benchmark 套件 `--suite external_tools`：
+    离线 stdio 零网络验证 mcp_stub_square invoke=36，runner 用 try/finally 隔离全局状态防泄漏）。
 ✅ **技能 SKILL.md 落盘（G12/G13）—— 已实现（2026-08-20）**
 
 **Voyager 技能沉淀成为跨会话持久资产**（修 LearningLoop 在内存技能不落盘的老问题）：
