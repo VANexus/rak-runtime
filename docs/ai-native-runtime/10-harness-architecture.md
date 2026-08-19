@@ -53,6 +53,10 @@
 - `_build_memory_context()` 增第三通道：注入 `## 超长期记忆（跨会话）` 紧凑索引
 - `_store_decision_memory()` / `_store_text_decision_memory()` 写穿
 - `record_user_correction()` 纠正以 importance=0.95 永久沉淀（最强学习信号）
+- **RAK_DATA_DIR 隔离一致性**（2026-08-20）：SuperMemory 默认 db_path 曾硬编码
+  `data/memory/super_long.db`、忽略 RAK_DATA_DIR（与其它单例不一致，超长期记忆层
+  跨运行串数据）；现经 `decision_engine._data_dir()` 派生（导入失败回退旧路径，
+  显式路径兼容）。
 
 ## 记忆即图（MemoryGraph，`src/core/memory_graph.py`）
 
