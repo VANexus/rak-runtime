@@ -28,7 +28,7 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-from src.core._utils import thinking_extra
+from src.core._utils import get_model, thinking_extra, safe_json_parse
 
 
 @dataclass
@@ -66,10 +66,18 @@ class LearningLoop:
     4. 洞察自动注入下次决策的 prompt
     """
 
-    def __init__(self, memory_engine=None, prompt_engine=None, semantic_cache=None):
+    def __init__(self, memory_engine=None, prompt_engine=None, semantic_cache=None,
+                 skills_dir=None):
         self.memory_engine = memory_engine
         self.prompt_engine = prompt_engine
         self.semantic_cache = semantic_cache
+
+        # 技能落盘目录（G12/G13）：默认 <RAK_DATA_DIR>/skills，可复用独立数据目录
+        if skills_dir is None:
+            from src.core.decision_engine import _data_dir
+            skills_dir = os.path.join(_data_dir(), "skills")
+        self.skills_dir = skills_dir
+        os.makedirs(self.skills_dir, exist_ok=True)
 
         # 执行记录缓冲
         self._records: List[ExecutionRecord] = []
@@ -85,6 +93,9 @@ class LearningLoop:
 
         # 技能库（Voyager 风格）
         self._skills: Dict[str, Dict] = {}  # pattern → {action, confidence, uses}
+
+        # 从磁盘恢复已学会技能（跨会话）
+        self._load_skills()
 
         # 统计
         self._total_decisions = 0
@@ -347,7 +358,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=256,
                 system="你是学习模块。简洁分析，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -360,7 +371,7 @@ class LearningLoop:
                     text = block.text
                     break
 
-            parsed = self._parse_json(text)
+            parsed = safe_json_parse(text)
             if parsed and parsed.get("lesson"):
                 lesson = parsed["lesson"]
                 self._add_insight(f"[Reflexion] {lesson}")
@@ -417,7 +428,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=256,
                 system="你是学习模块。从对比中提取规则，输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -430,7 +441,7 @@ class LearningLoop:
                     text = block.text
                     break
 
-            parsed = self._parse_json(text)
+            parsed = safe_json_parse(text)
             if parsed and parsed.get("rule"):
                 rule = parsed["rule"]
                 confidence = parsed.get("confidence", 0.5)
@@ -452,9 +463,11 @@ class LearningLoop:
 
     def _maybe_extract_skills(self):
         """
-        Voyager 风格：从重复的成功模式中提取可复用技能。
+        Voyager 风格：从重复的成功模式中提取/强化可复用技能，并落盘（G12/G13）。
 
-        如果同一个动作+上下文模式成功了 3+ 次，抽象为技能。
+        同一个动作+上下文模式成功 >=3 次 → 抽象为技能；已存在的技能随复用
+        成长（uses 上调、confidence 抬升），永不回退。技能以 SKILL.md 形式
+        持久化到 data/skills/，跨会话恢复（learned_at 保留最初沉淀时刻）。
         """
         recent = self._records[-50:]
         successes = [r for r in recent if r.success]
@@ -465,17 +478,129 @@ class LearningLoop:
             action_groups[r.action].append(r)
 
         for action, records in action_groups.items():
-            if len(records) >= 3:
-                # 检查是否已有此技能
-                skill_key = action
-                if skill_key not in self._skills:
-                    self._skills[skill_key] = {
+            if len(records) < 3:
+                continue
+            skill_key = action
+            if skill_key not in self._skills:
+                self._skills[skill_key] = {
+                    "action": action,
+                    "uses": len(records),
+                    "confidence": min(0.9, 0.5 + len(records) * 0.05),
+                    "learned_at": time.time(),
+                }
+                logger.info("[Learning] 新技能提取+落盘: %s (成功 %d 次)", action, len(records))
+            else:
+                sk = self._skills[skill_key]
+                # 复用强化：uses 累加、confidence 上调至 0.9 上限；learned_at 保留
+                sk["uses"] = max(sk.get("uses", 0), len(records))
+                sk["confidence"] = min(0.9, sk.get("confidence", 0.5) + 0.05)
+                logger.info("[Learning] 技能强化: %s (uses=%d conf=%.2f)",
+                            action, sk["uses"], sk["confidence"])
+            # 每次创建/强化都落盘
+            self._save_skill(self._skills[skill_key])
+
+    # ── 技能 SKILL.md 落盘（G12/G13）────────────────────────
+
+    def _skill_path(self, skill_key: str) -> str:
+        """技能文件路径：data/skills/<skill_key>.md"""
+        safe = "".join(c if c.isalnum() or c in "_-." else "_" for c in skill_key)
+        return os.path.join(self.skills_dir, f"{safe or 'skill'}.md")
+
+    def _save_skill(self, skill: Dict):
+        """把一条技能写为 SKILL.md（YAML frontmatter + 触发场景正文）。"""
+        try:
+            action = skill.get("action", "")
+            learned = skill.get("learned_at", time.time())
+            uses = skill.get("uses", 0)
+            confidence = round(skill.get("confidence", 0.5), 3)
+            frontmatter = (
+                "---\n"
+                f"name: {action}\n"
+                f"description: 反复成功的可复用能力（执行 {action} 已达 {uses} 次）\n"
+                f"action: {action}\n"
+                f"uses: {uses}\n"
+                f"confidence: {confidence}\n"
+                f"learned_at: {int(learned)}\n"
+                "metadata:\n"
+                "  type: skill\n"
+                "---\n\n"
+                f"# 技能：{action}\n\n"
+                f"通过学习闭环从重复成功中沉淀的能力。已复用 {uses} 次，"
+                f"置信度 {confidence:.0%}。\n"
+            )
+            from src.core._utils import atomic_write_json, safe_json_parse
+            # 用原子写保障（.md 文本直接写）
+            import tempfile
+            path = self._skill_path(action)
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".",
+                                       suffix=".tmp", prefix=".skill.")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(frontmatter)
+                os.replace(tmp, path)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.warning("[Learning] 技能落盘失败: %s", e)
+
+    def _load_skills(self):
+        """从 data/skills/*.md 恢复技能库（跨会话）。"""
+        try:
+            if not os.path.isdir(self.skills_dir):
+                return
+            for fn in os.listdir(self.skills_dir):
+                if not fn.endswith(".md"):
+                    continue
+                path = os.path.join(self.skills_dir, fn)
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        content = f.read()
+                    # 解析 frontmatter（--- 之间）
+                    if not content.startswith("---"):
+                        continue
+                    meta_end = content.find("\n---", 3)
+                    if meta_end < 0:
+                        continue
+                    fm = content[3:meta_end].strip()
+                    d = {}
+                    for line in fm.splitlines():
+                        if ":" in line:
+                            k, _, v = line.partition(":")
+                            d[k.strip()] = v.strip()
+                    action = d.get("action", "")
+                    if not action:
+                        continue
+                    self._skills[action] = {
                         "action": action,
-                        "uses": len(records),
-                        "confidence": min(0.9, 0.5 + len(records) * 0.05),
-                        "learned_at": time.time(),
+                        "uses": int(d.get("uses", 0) or 0),
+                        "confidence": float(d.get("confidence", 0.5) or 0.5),
+                        "learned_at": float(d.get("learned_at", 0) or time.time()),
                     }
-                    logger.info("[Learning] 新技能提取: %s (成功 %d 次)", action, len(records))
+                except Exception:
+                    logger.warning("[Learning] 技能加载跳过: %s", fn)
+            if self._skills:
+                logger.info("[Learning] 从磁盘恢复 %d 条技能: %s",
+                            len(self._skills), ", ".join(sorted(self._skills)))
+        except Exception as e:
+            logger.warning("[Learning] 技能加载失败: %s", e)
+
+    def get_skills_digest(self) -> str:
+        """把技能库转成可注入提示词的文本（让 LLM 知道『我已学会什么』）。"""
+        if not self._skills:
+            return ""
+        lines = ["## 我已学会的技能"]
+        for sk in sorted(self._skills.values(),
+                         key=lambda s: s.get("confidence", 0), reverse=True):
+            action = sk.get("action", "?")
+            uses = sk.get("uses", 0)
+            conf = sk.get("confidence", 0.5)
+            lines.append(f"- {action}（复用 {uses} 次，置信度 {conf:.0%}）")
+        return "\n".join(lines)
 
     def _maybe_consolidate_memory(self):
         """
@@ -516,7 +641,7 @@ class LearningLoop:
 
         try:
             response = llm.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=256,
                 system="你是记忆管理模块。决定保留什么、归档什么、丢弃什么。输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -529,7 +654,7 @@ class LearningLoop:
                     text = block.text
                     break
 
-            parsed = self._parse_json(text)
+            parsed = safe_json_parse(text)
             if parsed:
                 keep = parsed.get("keep", [])
                 if keep:
@@ -601,26 +726,6 @@ class LearningLoop:
         except Exception as e:
             logger.warning("[Learning] 存储记忆失败: %s", e)
 
-    def _parse_json(self, text: str) -> Optional[Dict]:
-        """解析 JSON（处理 markdown 代码块）"""
-        if not text:
-            return None
-        text = text.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 3:
-                text = parts[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return None
 
     def _get_llm_client(self):
         """获取 LLM 客户端（延迟初始化）"""

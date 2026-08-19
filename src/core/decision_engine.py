@@ -1706,6 +1706,16 @@ class DecisionEngine:
             except Exception as e:
                 logger.warning("[MemoryGraph] 检索失败: %s", e)
 
+        # ── 通道 5: 已学会技能（Voyager 沉淀，跨会话恢复）──
+        loop = _get_learning_loop()
+        if loop:
+            try:
+                digest = loop.get_skills_digest()
+                if digest:
+                    parts.append(digest)
+            except Exception as e:
+                logger.warning("[Skills] 技能注入失败: %s", e)
+
         # Agentic RAG 多跳检索：知识问题 + 记忆稀疏 + RAK_AGENTIC_RAG=1
         if (os.getenv("RAK_AGENTIC_RAG", "0") == "1"
                 and self._is_knowledge_question(query)

@@ -218,7 +218,17 @@
   - ⏳ fastmcp / A2A 三形态仍各自保有自己的 I/O 形状（pins rich output），
     统一到同一 ToolDef 源是剩余工作。
 ⬜ MCP 客户端（G6/G19 大脑连外部工具）—— 下阶段
-⬜ 技能 SKILL.md 落盘（G12/G13）—— 下阶段
+✅ **技能 SKILL.md 落盘（G12/G13）—— 已实现（2026-08-20）**
+
+**Voyager 技能沉淀成为跨会话持久资产**（修 LearningLoop 在内存技能不落盘的老问题）：
+- `src/core/learning_loop.py`：`_maybe_extract_skills` 由"仅首次创建"改为**创建/强化双路径**
+  ——复用（窗口内再 3 次成功）时 uses 上调、confidence +0.05 至 0.9 上限，learned_at 保留。
+- **SKILL.md 落盘**：每技能写 `data/skills/<action>.md`（YAML frontmatter name/description/
+  action/uses/confidence/learned_at + 正文），启动 `_load_skills()` 恢复 → **跨会话保留**。
+- `get_skills_digest()` 把技能库转成可注入提示词的文本，作为 `_build_memory_context`
+  的**通道 5** 注入——LLM/agent 深思路径能感知"我已学会什么"（窄腰原则，无技能时不注入）。
+- 全量 **271 passed / 1 skipped**（+6 条：提取落盘/跨实例恢复/复用强化/少次不提取/
+  digest 格式/空 digest）。
 ⬜ agent 内核思考 token 预算收敛（LongCat thinking 延迟）—— 下阶段
 ✅ **cold 决策 `->?` 断学习链修复** —— 已修（TODO #4）
 
