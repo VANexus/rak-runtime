@@ -97,6 +97,10 @@ digest() 注入 `build_agent_system_prompt`（agent 深思路径始终持有稳�
 - **运行**：`python -m src.harness.benchmark --suite all --baseline [--json out.json]`
 - 单测不碰网络（fake runner）；live 跑用 LongCat（.env 已配置）
 
+**离线套件验证（2026-08-20）**：memory 套件（8/8 PASS，平均召回 ~1ms 跨会话）
+与 external_tools 套件（1/1，stdio 零网络真调外部 stub 返回 36）经 CLI 端到端干净
+通过，确认评测框架对新能力的度量有效。
+
 ## 质量与降级原则（延续既有约定）
 
 - 一切外部依赖失败 → 标记不可用 → 系统继续（LLM→agent 内核→JSON→规则，一条降级链到底）
