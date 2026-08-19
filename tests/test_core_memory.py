@@ -66,3 +66,30 @@ class TestCoreMemoryPromptInjection:
         finally:
             for label in ("persona", "session"):
                 get_core_memory().set(label, "")
+
+
+class TestScratchAutoPopulate:
+    """run_agent 启动时应自动把当前任务写入 CoreMemory.scratch（Letta 临时工作记忆）。"""
+
+    def test_run_agent_populates_scratch(self, monkeypatch):
+        from unittest.mock import patch
+        from src.core.core_memory import get_core_memory
+        get_core_memory().set("scratch", "")
+        from src.core import agent_loop
+
+        # 用假模型避免真实 LLM；create_react_agent 返回带 invoke 的对象（返回空消息 → decision 空 → None）
+        class FakeModel:
+            def bind_tools(self, *a, **k):
+                return self
+
+        with patch("src.core._utils.make_langchain_anthropic",
+                   return_value=FakeModel()):
+            with patch.object(agent_loop, "create_react_agent") as cra:
+                ag = type("AG", (), {"invoke": lambda self, m, config: {"messages": []}})()
+                cra.return_value = ag
+                agent_loop.run_agent("帮我开灯", ["idle"], system_prompt="sys")
+
+        assert "帮我开灯" in get_core_memory().get("scratch")
+        # 恢复
+        get_core_memory().set("scratch", "")
+

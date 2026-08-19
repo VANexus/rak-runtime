@@ -232,6 +232,12 @@ def run_agent(user_msg: str, available_actions: list,
     """
     if not available_actions:
         return None
+    # CoreMemory scratch 自动填充：当前任务作为临时工作记忆（Letta 模式）
+    try:
+        from src.core.core_memory import get_core_memory
+        get_core_memory().set("scratch", f"当前任务: {user_msg[:120]}")
+    except Exception:
+        pass
     from src.core.agent_session import AgentSession, get_session_store
     session_id = f"agent-{int(time.time() * 1000)}"
     session = AgentSession(session_id=session_id, trace_id=trace_id)
