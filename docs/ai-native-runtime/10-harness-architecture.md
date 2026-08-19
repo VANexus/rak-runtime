@@ -150,6 +150,10 @@ digest() 注入 `build_agent_system_prompt`（agent 深思路径始终持有稳�
 **修复后复跑（live）：**
 - decision-suite：**13/13 PASS (1.0000)**，平均延迟 79ms（首个 991ms 走 LLM，
   其余 12 个由语义缓存/CogRec/规则 <10ms 命中）—— 快速通道价值实证。
+- **全栈活体复跑（2026-08-20）**：CoreMemory + 外部 MCP 工具 + 技能 + 全部记忆/工作流
+  集成就位后，decision-suite 仍 **13/13 PASS (1.0000)**、平均 15.3s/task（agent 内核
+  ReAct 真实 LongCat 深思；fast-path 任务 ~5-7s，LLM 任务 13-30s）——新增能力对决策
+  准确率零回归，全栈端到端正确。
 - workflow live：目标"给出三句温暖问候" → **completed，2 轮迭代**。
   第 1 轮被 reviewer 拒绝（"输出不完整，未满足三句要求"），带反馈重新规划执行后
   第 2 轮接受。评审反馈循环按设计工作，会话持久化（workflow-*）。
