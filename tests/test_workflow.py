@@ -318,3 +318,55 @@ class TestSubagentInheritsHarnessCapabilities:
         assert "mcp_stub_square" in names
         # 工作流子 agent 的 run_agent 走同一 _build_tools → 继承
 
+
+class TestWorkflowSuperMemory:
+    """工作流成果应写入超长期记忆（scope='workflow'，跨会话可召回先例）。"""
+
+    FAKE_PLAN = json.dumps({
+        "steps": [{"title": "查询", "task": "查询状态"}, {"title": "执行", "task": "执行开灯"}],
+    })
+
+    def _run(self):
+        return run_workflow(
+            "让灯亮起来",
+            planner=lambda goal: self.FAKE_PLAN,
+            executor=lambda task, goal="": {"action": "nod",
+                                            "answer": f"【结果】完成：{task}",
+                                            "trace": [], "session_id": "s"},
+            reviewer=lambda goal, s: {"accept": True, "feedback": ""},
+        )
+
+    def _fresh_super_memory(self):
+        # 重置单例指向隔离目录；返回可 recall 的句柄
+        import src.core.memory_longterm as mlt
+        mlt._instance = None
+        return mlt.get_super_memory()
+
+    def test_workflow_outcome_recallable(self, tmp_path, monkeypatch):
+        """completed 工作流后，SuperMemory scope='workflow' 应可召回目标+完成步骤。"""
+        monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
+        import src.core.decision_engine as de
+        de._super_memory = None
+        res = self._run()
+        assert res.status == "completed"
+        sm = self._fresh_super_memory()
+        hits = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
+        assert any("工作流" in h.content and "让灯亮起来" in h.content for h in hits)
+        full = sm.recall_full(hits[0].id)
+        assert full["metadata"].get("type") == "workflow"
+        assert full["metadata"].get("status") == "completed"
+        assert full["metadata"].get("session_id")
+
+    def test_workflow_memory_idempotent(self, tmp_path, monkeypatch):
+        """同目标再跑不重复落盘（幂等 content-hash）。"""
+        monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
+        import src.core.decision_engine as de
+        de._super_memory = None
+        self._run()
+        sm = self._fresh_super_memory()
+        hits = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
+        self._run()  # 再跑（单例仍指向同库）
+        hits2 = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
+        assert len(hits) == len(hits2), "同目标再跑应幂等（不新增重复条目）"
+
+
