@@ -62,6 +62,16 @@
 - `paths()` / `shortest_path()` BFS 路径发现——"这两段记忆如何相连"
 - `link()` 边同时写入 SuperMemory.memory_links（持久化委托，单一事实源）
 
+## Core Memory 块（`src/core/core_memory.py`，Letta/MemGPT 实证前沿模式）
+
+前沿研究（Letta，stateful agents 框架）确认三层记忆各有所用：core memory（总是
+in-context，labeled 分子块 persona/user/session/scratch，字符上限 + 只读配置）、
+recall memory（全文历史）、archival memory（无限存储但需显式检索）。rak-runtime
+已有 recall（短期/episodic）与 archival（SuperMemory/MemoryGraph）；本模块补齐
+**core memory** 层：labeled + 有界块（RAK_CORE_BLOCK_LIMIT 上限防上下文膨胀），
+digest() 注入 `build_agent_system_prompt`（agent 深思路径始终持有稳定自我/用户/任务
+快照）。全量 **300 passed / 1 skipped**（+7 测试）。
+
 ## 工作流系统（Workflow，`src/harness/workflow.py`）
 
 **Plan→Execute→Review** 三阶段循环，超越单 agent 循环：
