@@ -342,11 +342,20 @@ class TestWorkflowSuperMemory:
         mlt._instance = None
         return mlt.get_super_memory()
 
+    def _reset_singletons(self):
+        """重置全部超长期记忆/记忆图谱单例（防跨用例泄漏导致把工作流写入陈旧库）。"""
+        import src.core.memory_longterm as mlt
+        import src.core.memory_graph as mg
+        import src.core.decision_engine as de
+        mlt._instance = None
+        mg._instance = None
+        de._super_memory = None
+        de._memory_graph = None
+
     def test_workflow_outcome_recallable(self, tmp_path, monkeypatch):
         """completed 工作流后，SuperMemory scope='workflow' 应可召回目标+完成步骤。"""
         monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
-        import src.core.decision_engine as de
-        de._super_memory = None
+        self._reset_singletons()
         res = self._run()
         assert res.status == "completed"
         sm = self._fresh_super_memory()
@@ -360,8 +369,7 @@ class TestWorkflowSuperMemory:
     def test_workflow_memory_idempotent(self, tmp_path, monkeypatch):
         """同目标再跑不重复落盘（幂等 content-hash）。"""
         monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
-        import src.core.decision_engine as de
-        de._super_memory = None
+        self._reset_singletons()
         self._run()
         sm = self._fresh_super_memory()
         hits = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
