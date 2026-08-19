@@ -11,7 +11,6 @@ Agentic 内核 — LangGraph ReAct 工具调用循环。
 降级链：agent 不可用/模型不支持工具调用 → 单发 JSON 决策 → 规则引擎。
 """
 
-import json
 import logging
 import os
 import time
@@ -30,10 +29,25 @@ from src.core.hooks import (
 
 
 def _mk_tool(fn, name: str, session=None):
-    """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE + 记录轨迹（异常不阻断）"""
-    @tool
+    """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE + 记录轨迹（异常不阻断）。
+
+    内置"卡死护栏"（stuck-guard）：同一工具连续调用 >=3 次即跳过并提示模型
+    直接 finalize —— 防止模型在 ReAct 循环里反复调用同一工具空转（成本黑洞）。
+    """
+    guard = {"last": None, "repeat": 0}
+
     @wraps(fn)
     def wrapped(*args, **kwargs):
+        key = (name, str(args), str(kwargs))
+        if key == guard["last"]:
+            guard["repeat"] += 1
+        else:
+            guard["last"], guard["repeat"] = key, 0
+        if guard["repeat"] >= 3:
+            nudge = "（检测到你在重复调用同一工具，已跳过。请基于已有信息直接调用 finalize 完成决策。）"
+            get_hooks().fire(POST_TOOL_USE, tool=name, result=nudge,
+                             status="ok", duration_ms=0)
+            return nudge
         get_hooks().fire(PRE_TOOL_USE, tool=name)
         t0 = time.time()
         try:
@@ -52,63 +66,21 @@ def _mk_tool(fn, name: str, session=None):
                          result=str(result)[:200], status=status,
                          duration_ms=duration_ms)
         return result
-    return wrapped
+
+    # langchain @tool 用函数 __name__ 作工具名：覆盖为注册表名（G5 单一事实源）
+    wrapped.__name__ = name
+    return tool(wrapped)
 
 
 def _build_tools(available_actions: list, system_prompt: str, session=None):
-    """构建认知工具集（钩子包装 + 轨迹记录）+ 决策容器"""
+    """构建认知工具集（钩子包装 + 轨迹记录）+ 决策容器。
+
+    只读认知工具（search_memory/query_device/get_emotion/get_needs/reflect）
+    从 src.tools.registry 单一事实源派生（G5）；finalize 是决策容器特例，就地定义。
+    """
+    from src.tools.registry import COGNITIVE_TOOLS
+
     decision: dict = {}
-
-    def search_memory(query: str, top_k: int = 5) -> str:
-        """搜索记忆系统，查找相关经验、知识或历史事件。"""
-        from src.core import decision_engine as de
-        mem = de._get_memory_engine()
-        if mem is None:
-            return "（记忆系统不可用）"
-        results = mem.recall(query, top_k=top_k)
-        return json.dumps([
-            {"content": r.entry.content, "type": r.entry.memory_type}
-            for r in results
-        ], ensure_ascii=False)[:500]
-
-    def query_device(device_id: str = "") -> str:
-        """查询设备当前状态和能力。"""
-        from src.core import decision_engine as de
-        wm = de._get_world_model()
-        if wm is None:
-            return "（世界模型不可用）"
-        if device_id:
-            dev = wm.get_device(device_id)
-            if dev:
-                return json.dumps({
-                    "device_id": dev.device_id, "online": dev.online,
-                    "capabilities": dev.capabilities,
-                }, ensure_ascii=False)
-            return f"设备 {device_id} 未知"
-        return wm.format_device_state()[:500]
-
-    def get_emotion() -> str:
-        """查询大脑当前情绪状态。"""
-        from src.core import decision_engine as de
-        emo = de._get_emotion_engine()
-        return emo.state.describe() if emo else "（情绪引擎不可用）"
-
-    def get_needs() -> str:
-        """查询大脑当前内部需求。"""
-        from src.core import decision_engine as de
-        need = de._get_need_engine()
-        if need:
-            need.update()
-            return need.needs.describe()
-        return "（需求引擎不可用）"
-
-    def reflect() -> str:
-        """触发元认知自我反思，返回洞察。"""
-        from src.core import decision_engine as de
-        meta = de._get_meta_cognition()
-        if meta is None:
-            return "（元认知不可用）"
-        return json.dumps(meta.reflect(), ensure_ascii=False)[:500]
 
     def finalize(action: str, params_json: str, answer: str) -> str:
         """完成决策：记录最终选定的动作、参数 JSON 与对用户的回复。必须在最后调用。"""
@@ -117,14 +89,9 @@ def _build_tools(available_actions: list, system_prompt: str, session=None):
         decision["answer"] = answer
         return "决策已记录"
 
-    return [
-        _mk_tool(search_memory, "search_memory", session),
-        _mk_tool(query_device, "query_device", session),
-        _mk_tool(get_emotion, "get_emotion", session),
-        _mk_tool(get_needs, "get_needs", session),
-        _mk_tool(reflect, "reflect", session),
-        _mk_tool(finalize, "finalize", session),
-    ], decision
+    tools = [_mk_tool(td.handler, td.name, session) for td in COGNITIVE_TOOLS]
+    tools.append(_mk_tool(finalize, "finalize", session))
+    return tools, decision
 
 
 _BUILTIN_PERSONA = (
@@ -135,20 +102,18 @@ _BUILTIN_PERSONA = (
 
 def build_agent_system_prompt(system_prompt: str, available_actions: list) -> str:
     """分区系统提示词（设计见 docs/ai-native-runtime/09-prompts.md）"""
+    from src.tools.registry import COGNITIVE_TOOLS
     action_desc = "、".join(available_actions)
+    tool_lines = "\n".join(f"- {t.name}：{t.description}" for t in COGNITIVE_TOOLS)
     base = system_prompt or _BUILTIN_PERSONA
     return (
         f"{base}\n\n"
         f"## 可用动作\n"
         f"{action_desc}\n\n"
         f"## 你的工具（神经元）\n"
-        f"- search_memory：检索长期记忆与经验\n"
-        f"- query_device：查询设备当前状态\n"
-        f"- get_emotion：查询当前情绪状态\n"
-        f"- get_needs：查询内部需求\n"
-        f"- reflect：触发元认知反思\n\n"
+        f"{tool_lines}\n\n"
         f"## 决策流程\n"
-        f"1. 先用工具获取必要上下文（记忆/设备/情绪/需求），不要空想\n"
+        f"1. 先用工具获取必要上下文（记忆/设备/情绪/需求/自我），不要空想\n"
         f"2. 综合判断用户意图\n"
         f"3. 最后调用 finalize 工具产出决策\n\n"
         f"## finalize 契约（必须遵守）\n"
@@ -174,9 +139,9 @@ def run_agent(user_msg: str, available_actions: list,
     session = AgentSession(session_id=session_id, trace_id=trace_id)
     get_hooks().fire(SESSION_START, session_id=session_id)
     try:
-        from src.core._utils import make_langchain_anthropic
+        from src.core._utils import make_langchain_anthropic, get_model
         model = make_langchain_anthropic(
-            os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+            get_model(),
             timeout=30, max_tokens=1024,
         )
         tools, decision = _build_tools(available_actions, system_prompt, session)
@@ -189,7 +154,7 @@ def run_agent(user_msg: str, available_actions: list,
         result = agent.invoke({
             "messages": [SystemMessage(content=sys_text),
                          HumanMessage(content=user_msg)],
-        })
+        }, config={"recursion_limit": 12})
 
         # 提取工具调用轨迹
         trace = []

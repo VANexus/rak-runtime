@@ -209,7 +209,14 @@
   （confirm/低置信/空 action 路径），这些 task 的 paraphrase 全回退 LLM。修复 cold 决策
   可靠性是下一个延迟瓶颈。
 
-⬜ Tool registry（G5 三形态工具统一）—— 下阶段
+◑ **Tool registry（G5 三形态统一）—— 部分完成（2026-08-20）**
+  - ✅ `src/tools/registry.py` 认知工具单一事实源：5 → **10** 只读神经元
+    （新增 diffuse_memory / get_self_info / get_inner_thoughts / get_graph_stats /
+    get_cognitive_stats，全部派生自 decision_engine 单例 + `_safe_read` 降级）。
+  - ✅ agent 内核（`agent_loop._build_tools`）自动物化全部 registry 工具（10+finalize），
+    系统提示词工具列表改为从 registry 派生（窄腰原则，单一事实源）。
+  - ⏳ fastmcp / A2A 三形态仍各自保有自己的 I/O 形状（pins rich output），
+    统一到同一 ToolDef 源是剩余工作。
 ⬜ MCP 客户端（G6/G19 大脑连外部工具）—— 下阶段
 ⬜ 技能 SKILL.md 落盘（G12/G13）—— 下阶段
 ⬜ agent 内核思考 token 预算收敛（LongCat thinking 延迟）—— 下阶段
