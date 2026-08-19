@@ -377,4 +377,24 @@ class TestWorkflowSuperMemory:
         hits2 = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
         assert len(hits) == len(hits2), "同目标再跑应幂等（不新增重复条目）"
 
+    def test_related_goal_recall_generalization_gap(self, tmp_path, monkeypatch):
+        """相关目标召回泛化不足（已知限制）——锁定当前行为作为改进基线。
+
+        诚实记录：SuperMemory 词法召回（FTS/LIKE/bigram）对『让灯亮起来』能命中
+        近逐字查询，但改写后的相关目标（把灯光调亮/调亮书房的灯/灯光）返回空——
+        跨会话先例只能按近逐字召回，无法引导相关新目标（与语义缓存早期同义改写
+        失效同类；语义缓存用 Dice 层解决，超长期记忆泛化待后续）。此测试锁定当前
+        行为，防止静默『看似支持实不支持』。
+        """
+        monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
+        self._reset_singletons()
+        self._run()  # 写入「让灯亮起来」工作流记忆
+        sm = self._fresh_super_memory()
+        # 近逐字查询：可召回
+        exact = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
+        assert any("让灯亮起来" in h.content for h in exact)
+        # 改写相关目标：当前词法召回返回空（已知泛化缺口，见 docstring）
+        rewritten = sm.recall("把灯光调亮方便看书", scope="workflow", top_k=5)
+        assert all("让灯亮起来" not in h.content for h in rewritten)
+
 
