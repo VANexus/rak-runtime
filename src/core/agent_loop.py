@@ -194,11 +194,19 @@ def build_agent_system_prompt(system_prompt: str, available_actions: list) -> st
         logger.warning("[AgentLoop] 外部工具提示词失败: %s", e)
 
     ext_block = ("\n\n" + "\n".join(ext_lines)) if ext_lines else ""
+    # Core Memory（Letta 实证模式）：labeled 有界稳定记忆，总是注入上下文
+    try:
+        from src.core.core_memory import get_core_memory
+        core_block = get_core_memory().digest()
+    except Exception as e:
+        logger.warning("[AgentLoop] CoreMemory 注入失败: %s", e)
+        core_block = ""
     base = system_prompt or _BUILTIN_PERSONA
     return (
         f"{base}\n\n"
         f"## 可用动作\n"
         f"{action_desc}\n\n"
+        f"{core_block and (core_block + '\n\n') or ''}"
         f"## 你的工具（神经元）\n"
         f"{tool_lines}"
         f"{ext_block}\n\n"
