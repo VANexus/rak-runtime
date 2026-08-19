@@ -217,7 +217,15 @@
     系统提示词工具列表改为从 registry 派生（窄腰原则，单一事实源）。
   - ⏳ fastmcp / A2A 三形态仍各自保有自己的 I/O 形状（pins rich output），
     统一到同一 ToolDef 源是剩余工作。
-⬜ MCP 客户端（G6/G19 大脑连外部工具）—— 下阶段
+◑ **MCP 客户端（G6/G19 大脑连外部工具）—— 第一切片已实现（2026-08-20）**
+  - ✅ `src/tools/mcp_client.py`：大脑作为 MCP **客户端**（区别于现有 fastmcp_server 的
+    server 端），连接并调用外部工具服务器。双传输：stdio（`RAK_MCP_SERVERS` env spawn
+    子进程，用 `mcp` SDK `ClientSession`）与 in-process（fastmcp.Client，测试/嵌入式）。
+  - ✅ `list_external_tools()` 发现外部工具 + `call_tool()` 调用；短连接、降级（未配置/
+    失败 → 错误说明不抛）；`get_mcp_client()` 单例。
+  - ⏳ 把外部 MCP 工具物化为 Agent 内核可调工具（命名/权限门/工具注册）—— 后续接线。
+  - 全量 **279 passed / 1 skipped**（+8：in-process list/call、stdio list/call、env 解析、
+    降级、单例、Tool to_dict）。
 ✅ **技能 SKILL.md 落盘（G12/G13）—— 已实现（2026-08-20）**
 
 **Voyager 技能沉淀成为跨会话持久资产**（修 LearningLoop 在内存技能不落盘的老问题）：
