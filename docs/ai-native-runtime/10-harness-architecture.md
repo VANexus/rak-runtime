@@ -243,7 +243,11 @@
   的**通道 5** 注入——LLM/agent 深思路径能感知"我已学会什么"（窄腰原则，无技能时不注入）。
 - 全量 **271 passed / 1 skipped**（+6 条：提取落盘/跨实例恢复/复用强化/少次不提取/
   digest 格式/空 digest）。
-⬜ agent 内核思考 token 预算收敛（LongCat thinking 延迟）—— 下阶段
+✅ **agent 内核思考 token 预算收敛（LongCat thinking 延迟）—— 配置驱动**
+  - `run_agent` 的 `max_tokens`（原硬编码 1024）与 `recursion_limit`（原 12）改为
+    env 可配 `RAK_AGENT_MAX_TOKENS` / `RAK_AGENT_RECURSION`（`_env_int` 安全解析 +
+    clamp >=1，默认不变）。LongCat thinking/工具循环预算可运行时收敛，无需改码。
+    全量 289 passed / 1 skipped（+3：_env_int 默认/覆盖/clamp、run_agent 用配置预算）。
 ✅ **cold 决策 `->?` 断学习链修复** —— 已修（TODO #4）
 
 **TODO #4 修复（2026-08-20，`src/core/decision_engine.py`）：**
