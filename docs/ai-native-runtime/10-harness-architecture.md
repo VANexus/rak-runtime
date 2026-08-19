@@ -223,9 +223,12 @@
     子进程，用 `mcp` SDK `ClientSession`）与 in-process（fastmcp.Client，测试/嵌入式）。
   - ✅ `list_external_tools()` 发现外部工具 + `call_tool()` 调用；短连接、降级（未配置/
     失败 → 错误说明不抛）；`get_mcp_client()` 单例。
-  - ⏳ 把外部 MCP 工具物化为 Agent 内核可调工具（命名/权限门/工具注册）—— 后续接线。
-  - 全量 **279 passed / 1 skipped**（+8：in-process list/call、stdio list/call、env 解析、
-    降级、单例、Tool to_dict）。
+  - ✅ **外部工具物化进 agent 内核**（G6/G19-2）：`agent_loop._build_external_tools` 把外部
+    MCP 工具物化为 `mcp_<server>_<tool>` 可调工具（单 kwargs_json 参、description 带
+    input_schema、权限门 deny 跳过、降级不抛），仅当 `RAK_MCP_SERVERS` 配置时启用；
+    `build_agent_system_prompt` 同步列出外部工具段。→ LangGraph ReAct 深思时能**真调用
+    外部工具服务器**（离线实证 `mcp_stub_square.invoke({"kwargs_json":"{\"n\":6}"})`=36）。
+  - 全量 **282 passed / 1 skipped**（+3：外部工具物化、未配置不物化、提示词列出）。
 ✅ **技能 SKILL.md 落盘（G12/G13）—— 已实现（2026-08-20）**
 
 **Voyager 技能沉淀成为跨会话持久资产**（修 LearningLoop 在内存技能不落盘的老问题）：

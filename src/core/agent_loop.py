@@ -11,6 +11,7 @@ Agentic 内核 — LangGraph ReAct 工具调用循环。
 降级链：agent 不可用/模型不支持工具调用 → 单发 JSON 决策 → 规则引擎。
 """
 
+import json
 import logging
 import os
 import time
@@ -91,7 +92,70 @@ def _build_tools(available_actions: list, system_prompt: str, session=None):
 
     tools = [_mk_tool(td.handler, td.name, session) for td in COGNITIVE_TOOLS]
     tools.append(_mk_tool(finalize, "finalize", session))
+    # 外部 MCP 工具（G6/G19）：仅当 RAK_MCP_SERVERS 配置时物化，供 agent 调外部工具
+    tools.extend(_build_external_tools(session))
     return tools, decision
+
+
+def _build_external_tools(session=None):
+    """
+    把大脑 MCP 客户端的【外部 MCP 工具】物化为 agent 可调工具（G6/G19）。
+
+    仅当 RAK_MCP_SERVERS 配置（MCPToolClient.configured）时启用；命名
+    mcp_<server>_<tool>（净化），handler 收单个 kwargs_json 字符串（外部工具
+    input_schema 未知，用单字符串承载 + description 带 schema 供 LLM 参考）。
+    权限 deny 的工具跳过；调用失败降级为错误文本（不抛）。
+    """
+    from src.tools.mcp_client import get_mcp_client
+    try:
+        client = get_mcp_client()
+    except Exception as e:
+        logger.warning("[AgentLoop] MCP 客户端不可用: %s", e)
+        return []
+    if client is None or not client.configured:
+        return []
+
+    from src.core.permissions import get_permission_policy
+    policy = get_permission_policy()
+    external = []
+    for et in client.list_external_tools():
+        fq = f"mcp_{et.server}_{et.name}".replace("-", "_").replace(".", "_")
+        if policy.evaluate(fq).verdict == "deny":
+            logger.info("[AgentLoop] 外部 MCP 工具被权限门拒绝: %s", fq)
+            continue
+
+        schema_hint = ""
+        if et.input_schema:
+            try:
+                import json as _json
+                schema_hint = f"\n期望参数 JSON 结构: {_json.dumps(et.input_schema, ensure_ascii=False)}"
+            except Exception:
+                schema_hint = ""
+
+        def _handler(kwargs_json: str) -> str:
+            """调用外部 MCP 工具（kwargs_json 为参数 JSON 字符串）。"""
+            try:
+                payload = json.loads(kwargs_json or "{}") if isinstance(kwargs_json, str) else dict(kwargs_json or {})
+            except Exception:
+                payload = {"raw": str(kwargs_json)}
+            return client.call_tool(et.server, et.name, payload)
+
+        _handler.__name__ = fq
+        wrapped = _mk_tool(_handler, fq, session)
+        # 把外部工具的 description + schema 写进工具描述，供 LLM 参考怎么传参
+        desc = (et.description or f"调用外部服务器 {et.server} 的工具 {et.name}")
+        if schema_hint:
+            desc += schema_hint
+        # langchain 工具可设 description（通过 metadata 不可行，故用 docstring 注入）
+        try:
+            wrapped.__doc__ = desc
+            wrapped.description = desc
+        except Exception:
+            pass
+        external.append(wrapped)
+    if external:
+        logger.info("[AgentLoop] 物化 %d 个外部 MCP 工具", len(external))
+    return external
 
 
 _BUILTIN_PERSONA = (
@@ -105,13 +169,30 @@ def build_agent_system_prompt(system_prompt: str, available_actions: list) -> st
     from src.tools.registry import COGNITIVE_TOOLS
     action_desc = "、".join(available_actions)
     tool_lines = "\n".join(f"- {t.name}：{t.description}" for t in COGNITIVE_TOOLS)
+
+    # 外部 MCP 工具（G6/G19）：仅当 RAK_MCP_SERVERS 配置时列出
+    ext_lines = []
+    try:
+        from src.tools.mcp_client import get_mcp_client
+        mc = get_mcp_client()
+        if mc is not None and mc.configured:
+            for et in mc.list_external_tools():
+                fq = f"mcp_{et.server}_{et.name}".replace("-", "_").replace(".", "_")
+                ext_lines.append(f"- {fq}：外部 {et.server} 工具「{et.name}」— 参数用 kwargs_json JSON 字符串")
+            if ext_lines:
+                ext_lines.insert(0, f"## 外部 MCP 工具（可调用外部服务器）")
+    except Exception as e:
+        logger.warning("[AgentLoop] 外部工具提示词失败: %s", e)
+
+    ext_block = ("\n\n" + "\n".join(ext_lines)) if ext_lines else ""
     base = system_prompt or _BUILTIN_PERSONA
     return (
         f"{base}\n\n"
         f"## 可用动作\n"
         f"{action_desc}\n\n"
         f"## 你的工具（神经元）\n"
-        f"{tool_lines}\n\n"
+        f"{tool_lines}"
+        f"{ext_block}\n\n"
         f"## 决策流程\n"
         f"1. 先用工具获取必要上下文（记忆/设备/情绪/需求/自我），不要空想\n"
         f"2. 综合判断用户意图\n"

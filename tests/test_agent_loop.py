@@ -76,6 +76,58 @@ class TestToolRegistrySingleSource:
 
 
 
+class TestExternalMCPTools:
+    """G6/G19-2：大脑 MCP 客户端的【外部 MCP 工具】物化进 agent 内核（仅当 RAK_MCP_SERVERS 配置时）。"""
+
+    _PY = None
+
+    def _server_cfg(self):
+        # 用当前 venv python 全路径 spawn stub（裸 "python" 不在 PATH）
+        import sys
+        return [{"name": "stub", "command": sys.executable,
+                 "args": ["-u", "/tmp/rak_stub_mcp.py"]}]
+
+    def test_external_tools_materialize(self, monkeypatch):
+        """配置 RAK_MCP_SERVERS 后，_build_tools 应含 mcp_stub_square（并真实调用 stub）。"""
+        import sys
+        monkeypatch.setenv("RAK_MCP_SERVERS",
+                           __import__("json").dumps(self._server_cfg()))
+        # 重置 mcp client 单例以读取 env
+        import src.tools.mcp_client as mc
+        mc._client = None
+        tools, _ = agent_loop._build_tools(["idle"], "")
+        names = [getattr(t, "name", "?") for t in tools]
+        assert "mcp_stub_square" in names
+        assert "mcp_stub_hello" in names
+        # invoke square：agent 工具真调用外部 stub 子进程
+        sq = next(t for t in tools if getattr(t, "name", "") == "mcp_stub_square")
+        out = sq.invoke({"kwargs_json": '{"n": 6}'})
+        assert str(out).strip() == "36"
+
+    def test_no_external_without_config(self, monkeypatch):
+        """未配置 RAK_MCP_SERVERS 时，不物化外部工具（默认行为不变）。"""
+        monkeypatch.delenv("RAK_MCP_SERVERS", raising=False)
+        import src.tools.mcp_client as mc
+        mc._client = None
+        tools, _ = agent_loop._build_tools(["idle"], "")
+        names = [getattr(t, "name", "?") for t in tools]
+        assert not any(n.startswith("mcp_") for n in names)
+        # 数量 = registry 全部 + finalize
+        from src.tools.registry import get_tool_defs
+        assert len(tools) == len(get_tool_defs()) + 1
+
+    def test_system_prompt_advertises_external(self, monkeypatch):
+        """配置后系统提示词列出外部 MCP 工具。"""
+        import sys
+        monkeypatch.setenv("RAK_MCP_SERVERS",
+                           __import__("json").dumps(self._server_cfg()))
+        import src.tools.mcp_client as mc
+        mc._client = None
+        sp = agent_loop.build_agent_system_prompt("", ["idle"])
+        assert "外部 MCP 工具" in sp
+        assert "mcp_stub_square" in sp
+
+
 class TestAgentDecide:
     def test_agent_failure_falls_back_to_json(self, monkeypatch):
         """agent 失败应降级单发 JSON 决策"""
