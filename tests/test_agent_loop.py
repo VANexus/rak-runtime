@@ -162,6 +162,55 @@ class TestAgentDecide:
         assert result["action"] == "nod"
 
 
+class TestAgentBudgetConfig:
+    """agent 深思 token/递归预算应配置驱动（RAK_AGENT_MAX_TOKENS / RAK_AGENT_RECURSION）。"""
+
+    def test_env_int_defaults(self, monkeypatch):
+        """未设置时返回默认值。"""
+        monkeypatch.delenv("RAK_AGENT_MAX_TOKENS", raising=False)
+        assert agent_loop._env_int("RAK_AGENT_MAX_TOKENS", 1024) == 1024
+
+    def test_env_int_override_and_clamp(self, monkeypatch):
+        """设置时读覆盖值；非数字/<=0 时防呆。"""
+        monkeypatch.setenv("RAK_AGENT_MAX_TOKENS", "512")
+        assert agent_loop._env_int("RAK_AGENT_MAX_TOKENS", 1024) == 512
+        monkeypatch.setenv("RAK_AGENT_MAX_TOKENS", "abc")
+        assert agent_loop._env_int("RAK_AGENT_MAX_TOKENS", 1024) == 1024
+        monkeypatch.setenv("RAK_AGENT_MAX_TOKENS", "0")
+        assert agent_loop._env_int("RAK_AGENT_MAX_TOKENS", 1024) == 1  # clamp
+
+    def test_run_agent_uses_configured_budget(self, monkeypatch):
+        """run_agent 应把 RAK_AGENT_MAX_TOKENS/RAK_AGENT_RECURSION 传给模型与 agent.invoke。"""
+        monkeypatch.setenv("RAK_AGENT_MAX_TOKENS", "512")
+        monkeypatch.setenv("RAK_AGENT_RECURSION", "8")
+        seen = {}
+
+        class FakeModel:
+            def bind_tools(self, *a, **k):
+                return self
+
+        def _fake_invoke(self, messages, config):
+            seen["recursion"] = config.get("recursion_limit")
+            # 模拟模型未调 finalize → decision 空 → run_agent 返回 None
+            return {"messages": []}
+
+        with patch("src.core._utils.make_langchain_anthropic") as mk:
+            mk.return_value = FakeModel()
+            with patch.object(agent_loop, "create_react_agent") as cra:
+                # 让 create_react_agent 返回一个带 invoke 的对象
+                agent_obj = type("AG", (), {})()
+                # 用顶替对象：直接测 max_tokens 传给 make_langchain_anthropic
+                ag = object()
+                cra.return_value = type("A", (), {"invoke": _fake_invoke})()
+
+                agent_loop.run_agent("hi", ["idle"], system_prompt="sys")
+        # max_tokens 应为 512（覆盖默认 1024）
+        call_kwargs = mk.call_args.kwargs
+        assert call_kwargs.get("max_tokens") == 512
+        # recursion 应为 8
+        assert seen.get("recursion") == 8
+
+
 class TestRealAgent:
     def test_real_model_agent_loop(self):
         """真实模型 agent 端到端（RAK_LIVE_TESTS=1 才跑，默认跳过保离线确定性）"""

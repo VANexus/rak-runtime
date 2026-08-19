@@ -29,6 +29,15 @@ from src.core.hooks import (
 )
 
 
+def _env_int(name: str, default: int) -> int:
+    """安全读取整数环境变量（非数字/未设置回退默认；负数 clamp 到 1）。"""
+    try:
+        v = int(os.getenv(name, ""))
+        return max(1, v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _mk_tool(fn, name: str, session=None):
     """包一层钩子：工具调用前后 fire PRE/POST_TOOL_USE + 记录轨迹（异常不阻断）。
 
@@ -221,9 +230,12 @@ def run_agent(user_msg: str, available_actions: list,
     get_hooks().fire(SESSION_START, session_id=session_id)
     try:
         from src.core._utils import make_langchain_anthropic, get_model
+        # 深思 token/递归预算：配置驱动（默认值不变，LongCat thinking 延迟可在运行时收敛）
+        max_tokens = _env_int("RAK_AGENT_MAX_TOKENS", 1024)
+        recursion_limit = _env_int("RAK_AGENT_RECURSION", 12)
         model = make_langchain_anthropic(
             get_model(),
-            timeout=30, max_tokens=1024,
+            timeout=30, max_tokens=max_tokens,
         )
         tools, decision = _build_tools(available_actions, system_prompt, session)
         agent = create_react_agent(model, tools)
@@ -235,7 +247,7 @@ def run_agent(user_msg: str, available_actions: list,
         result = agent.invoke({
             "messages": [SystemMessage(content=sys_text),
                          HumanMessage(content=user_msg)],
-        }, config={"recursion_limit": 12})
+        }, config={"recursion_limit": recursion_limit})
 
         # 提取工具调用轨迹
         trace = []
