@@ -70,7 +70,8 @@ recall memory（全文历史）、archival memory（无限存储但需显式检�
 已有 recall（短期/episodic）与 archival（SuperMemory/MemoryGraph）；本模块补齐
 **core memory** 层：labeled + 有界块（RAK_CORE_BLOCK_LIMIT 上限防上下文膨胀），
 digest() 注入 `build_agent_system_prompt`（agent 深思路径始终持有稳定自我/用户/任务
-快照）。全量 **300 passed / 1 skipped**（+7 测试）。
+快照）。scratch 块由 `run_agent` 启动时自动填充当前任务（临时工作记忆闭环）。
+全量 **301 passed / 1 skipped**（+8 测试）。
 
 ## 工作流系统（Workflow，`src/harness/workflow.py`）
 
