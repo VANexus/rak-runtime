@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from typing import Optional
+from src.core._utils import get_model
 
 logger = logging.getLogger("rak.compaction")
 
@@ -78,7 +79,7 @@ def compact_context(memory_context: str, max_chars: int = 3000,
             return None
         prompt = build_compaction_prompt(memory_context, keep_tail)
         resp = client.messages.create(
-            model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+            model=get_model(),
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )

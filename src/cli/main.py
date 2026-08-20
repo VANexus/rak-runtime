@@ -18,7 +18,6 @@ import json
 import os
 import sys
 import time
-from types import SimpleNamespace
 
 from rich.console import Console
 from rich.panel import Panel
@@ -44,17 +43,10 @@ BANNER = """
 
 
 def run_brain(text: str, trace_id: str = "") -> dict:
-    """把用户输入交给大脑决策（与 gRPC/A2A 同路径）"""
-    from src.core.decision_engine import DecisionEngine
-    engine = DecisionEngine()
-    req = SimpleNamespace(
-        version="v0",
-        trace_id=trace_id or f"cli-{int(time.time() * 1000)}",
-        source="cli:user", target="runtime:default",
-        action="", state=text, available_actions=AVAILABLE_ACTIONS,
-        params_json="{}",
-    )
-    return engine.decide(req)
+    """把用户输入交给大脑决策（统一走 src.harness.brain 入口，与 A2A/benchmark 同路径）"""
+    from src.harness.brain import run_brain as _run
+    return _run(text, trace_id=trace_id or f"cli-{int(time.time() * 1000)}",
+                source="cli:user")
 
 
 def render_decision(text: str, result: dict) -> str:

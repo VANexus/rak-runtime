@@ -16,6 +16,15 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# 加载项目本地 .env（gitignored）——RAK_LLM_* 显式配置优先于宿主机全局 ANTHROPIC_* 代理环境变量
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path, override=True)
+except ImportError:  # 无 python-dotenv 时静默跳过，仍可用环境变量
+    pass
+
 
 def atomic_write_json(path: str, data: Any) -> bool:
     """
@@ -117,25 +126,31 @@ def time_diff_minutes(time_str: str) -> float:
 
 
 def get_model() -> str:
-    """当前 LLM 模型名（ANTHROPIC_MODEL env，默认 mimo-v2.5-pro）"""
-    return os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro")
+    """当前 LLM 模型名。优先级：RAK_LLM_MODEL > ANTHROPIC_MODEL > 默认 mimo-v2.5-pro"""
+    return os.getenv("RAK_LLM_MODEL") or os.getenv("ANTHROPIC_MODEL") or "mimo-v2.5-pro"
 
 
 def resolve_llm_env() -> tuple:
     """
     解析 LLM 认证配置，返回 (key, base_url, auth_scheme)。
 
-    兼容两种 key 约定：
-    - ANTHROPIC_AUTH_TOKEN（token-plan 等代理）
+    优先级（显式项目配置 > 宿主机全局代理）：
+    - RAK_LLM_API_KEY / RAK_LLM_BASE_URL / RAK_LLM_AUTH_SCHEME（项目 .env 或显式设置）
+    - ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL（宿主机代理，如 127.0.0.1 网关）
     - LONGCAT_API_KEY（LongCat 官方 CLI 约定）→ 自动用 LongCat base + Bearer
     """
-    key = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LONGCAT_API_KEY") or ""
-    base = os.getenv("ANTHROPIC_BASE_URL") or ""
-    scheme = os.getenv("ANTHROPIC_AUTH_SCHEME") or ""
+    key = (os.getenv("RAK_LLM_API_KEY")
+           or os.getenv("ANTHROPIC_AUTH_TOKEN")
+           or os.getenv("LONGCAT_API_KEY") or "")
+    base = (os.getenv("RAK_LLM_BASE_URL")
+            or os.getenv("ANTHROPIC_BASE_URL") or "")
+    scheme = (os.getenv("RAK_LLM_AUTH_SCHEME")
+              or os.getenv("ANTHROPIC_AUTH_SCHEME") or "")
 
     if not base:
         # 用了 LongCat key 且未显式指定 base → 默认 LongCat
-        if os.getenv("LONGCAT_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN"):
+        if (os.getenv("LONGCAT_API_KEY") or os.getenv("RAK_LLM_API_KEY")) \
+                and not (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("RAK_LLM_BASE_URL")):
             base = "https://api.longcat.chat/anthropic"
         else:
             base = "https://token-plan-cn.xiaomimimo.com/anthropic"
@@ -184,7 +199,12 @@ def make_langchain_anthropic(model: str, timeout: float = 30.0, max_tokens: int 
 
 
 def thinking_extra() -> dict:
-    """LLM 调用的 thinking 参数（RAK_THINKING=1 启用深思，默认关=快速 JSON 决策）"""
+    """
+    LLM 调用的 thinking 参数。
+    - RAK_THINKING=1 → 显式启用深思
+    - 否则 → 不传 thinking 参数（省略）。注意：不能发 `{"type":"disabled"}`
+      因为 LongCat-2.0 等模型会拒绝显式 disabled；省略则走模型默认。
+    """
     if os.getenv("RAK_THINKING", "0") == "1":
         return {"thinking": {"type": "enabled"}}
-    return {"thinking": {"type": "disabled"}}
+    return {}

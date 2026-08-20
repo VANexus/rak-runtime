@@ -106,6 +106,7 @@ class MetaCognition:
         query: str,
         cache_hit: bool = False,
         cache_similarity: float = 0.0,
+        cache_is_paraphrase: bool = False,
         memory_match_count: int = 0,
         memory_best_similarity: float = 0.0,
         llm_response: Optional[dict] = None,
@@ -129,8 +130,11 @@ class MetaCognition:
         if cache_hit:
             if cache_similarity >= 0.98:
                 factors["cache"] = 0.95  # 精确匹配
-            elif cache_similarity >= 0.92:
-                factors["cache"] = 0.80  # 语义匹配
+            elif cache_is_paraphrase or cache_similarity >= 0.92:
+                # 改写命中（Dice 层已校验阈值+意图类别守卫）≈ 语义匹配的可靠度。
+                # 快速通道只含 cache 因子（无 LLM/记忆/规则），0.40~0.56 的 Dice
+                # 若不设高权会算出 ~0.18 低置信度 → 被元认知丢回 LLM，快通道失效。
+                factors["cache"] = 0.85
             else:
                 factors["cache"] = 0.60
         else:
@@ -305,6 +309,16 @@ class MetaCognition:
                 )
 
         # 低置信度或不确定
+        # 简单动作指令即便低置信也不应被"询问"卡死：走规则引擎给 best-effort
+        # 动作（规则兜底会返回动作或安全 idle），保住学习/改写缓存链。
+        # 若规则都找不到匹配，则 ASK_USER 兜底仍保留询问安全网。
+        if is_simple:
+            return StrategyDecision(
+                strategy=Strategy.RULE,
+                reasoning="低置信度但有明确动作关键词，规则引擎 best-effort（避免无动作死路）",
+                estimated_latency_ms=5,
+                fallback=Strategy.ASK_USER,
+            )
 
         # LLM 已返回有效结果 → 信任 LLM，不要反复确认
         if confidence.factors.get("llm", 0) >= 0.7:

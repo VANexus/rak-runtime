@@ -24,6 +24,7 @@ import os
 import time
 from typing import List, Dict, Optional, Callable
 from dataclasses import dataclass
+from src.core._utils import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ class SleepConsolidation:
 请用一句话总结最重要的经验教训。"""
 
             response = self.llm_client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}],
             )

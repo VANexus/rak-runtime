@@ -20,6 +20,7 @@ import time
 from typing import List, Dict, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from src.core._utils import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ class AgenticRAGWithLLM(AgenticRAG):
 }}"""
 
             response = self.llm_client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -385,7 +386,7 @@ class AgenticRAGWithLLM(AgenticRAG):
             evidence_text = "\n".join(f"[{i+1}] {ev}" for i, ev in enumerate(evidence[:10]))
 
             response = self.llm_client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=256,
                 messages=[{
                     "role": "user",

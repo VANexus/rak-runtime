@@ -16,7 +16,6 @@ import asyncio
 import logging
 import os
 import time
-from types import SimpleNamespace
 
 import uvicorn
 from fastapi import FastAPI
@@ -62,17 +61,10 @@ AVAILABLE_ACTIONS = [
 
 
 def run_brain_decision(text: str, trace_id: str = "") -> dict:
-    """把 A2A 消息交给大脑决策（与 gRPC Execute 同路径，含 agent 内核）"""
-    from src.core.decision_engine import DecisionEngine
-    engine = DecisionEngine()
-    req = SimpleNamespace(
-        version="v0",
-        trace_id=trace_id or f"a2a-{int(time.time() * 1000)}",
-        source="a2a:client", target="runtime:default",
-        action="", state=text, available_actions=AVAILABLE_ACTIONS,
-        params_json="{}",
-    )
-    return engine.decide(req)
+    """把 A2A 消息交给大脑决策（统一走 src.harness.brain，与 gRPC/CLI 同路径）"""
+    from src.harness.brain import run_brain
+    return run_brain(text, trace_id=trace_id or f"a2a-{int(time.time() * 1000)}",
+                     source="a2a:client")
 
 
 class RakExecutor(AgentExecutor):

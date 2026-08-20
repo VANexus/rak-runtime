@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-from src.core._utils import thinking_extra
+from src.core._utils import get_model, thinking_extra, safe_json_parse
 
 
 @dataclass
@@ -196,7 +196,7 @@ class ActionMemory:
 
         try:
             response = llm.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=128,
                 system="你是决策重放评估模块。判断历史决策是否可以直接重用。只输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
@@ -209,7 +209,7 @@ class ActionMemory:
                     text = block.text
                     break
 
-            parsed = self._parse_json(text)
+            parsed = safe_json_parse(text)
             if parsed and parsed.get("match") and parsed.get("action"):
                 action = parsed["action"]
                 if action in available_actions:
@@ -344,23 +344,3 @@ class ActionMemory:
             except Exception:
                 pass
         return self._llm
-
-    def _parse_json(self, text: str):
-        if not text:
-            return None
-        text = text.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 3:
-                text = parts[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return None

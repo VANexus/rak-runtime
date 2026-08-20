@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-from src.core._utils import thinking_extra
+from src.core._utils import get_model, thinking_extra, safe_json_parse
 
 
 @dataclass
@@ -77,7 +77,7 @@ class SafetyGovernance:
 
         try:
             response = llm.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "mimo-v2.5-pro"),
+                model=get_model(),
                 max_tokens=128,
                 system="你是安全评估模块。根据上下文判断操作是否安全。只输出 JSON。",
                 messages=[{"role": "user", "content": context}],
@@ -90,7 +90,7 @@ class SafetyGovernance:
                     text = block.text
                     break
 
-            parsed = self._parse_json(text)
+            parsed = safe_json_parse(text)
             if parsed:
                 allowed = parsed.get("safe", True)
                 reason = parsed.get("reason", "")
@@ -182,26 +182,6 @@ class SafetyGovernance:
         if len(self._violations) > self._max_violations:
             self._violations = self._violations[-self._max_violations:]
 
-    def _parse_json(self, text: str) -> Optional[Dict]:
-        if not text:
-            return None
-        text = text.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 3:
-                text = parts[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return None
-
     def _get_llm_client(self):
         if self._llm_client is None:
             try:
@@ -221,3 +201,4 @@ class SafetyGovernance:
                 for v in self._violations[-5:]
             ],
         }
+
