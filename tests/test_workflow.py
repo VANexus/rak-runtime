@@ -402,3 +402,119 @@ class TestWorkflowSuperMemory:
         assert all("让灯亮起来" not in h.content for h in unrelated)
 
 
+
+
+class TestWorkflowReflection:
+    """工作流反思（跨会话自我改进）：蒸馏经验入超长期记忆并回灌规划。
+
+    设计：_distill_lesson 确定性离线；lesson 存 scope='workflow_lesson'；
+    新目标经 _recall_lessons（复用语义 recall_related）召回既往经验引导规划。
+    """
+
+    FAKE_PLAN = json.dumps({
+        "steps": [{"title": "查询", "task": "查询状态"}, {"title": "执行", "task": "执行开灯"}],
+    })
+
+    def _run_faulty(self, goal, reject_then_accept=True):
+        """跑一个会经历 1 轮评审拒绝才通过的工作流，产生多轮 lesson。"""
+        state = {"n": 0}
+
+        def planner(g):
+            return self.FAKE_PLAN
+
+        def executor(t, goal=""):
+            return {"action": "nod", "answer": f"【结果】完成：{t}",
+                    "trace": [], "session_id": "s"}
+
+        def reviewer(g, summary):
+            state["n"] += 1
+            if reject_then_accept and state["n"] == 1:
+                return {"accept": False, "feedback": "第二步应先确认灯泡状态"}
+            return {"accept": True, "feedback": ""}
+
+        return run_workflow(goal, planner=planner, executor=executor,
+                            reviewer=reviewer, max_iterations=2)
+
+    def _reset_singletons(self):
+        import src.core.memory_longterm as mlt
+        import src.core.memory_graph as mg
+        import src.core.decision_engine as de
+        mlt._instance = None
+        mg._instance = None
+        de._super_memory = None
+        de._memory_graph = None
+
+    def _fresh_super_memory(self):
+        import src.core.memory_longterm as mlt
+        mlt._instance = None
+        return mlt.get_super_memory()
+
+    # ── _distill_lesson（确定性、离线） ──────────────────────
+
+    def test_distill_completed_multiround(self):
+        """completed 且多轮 -> 记录『需 N 轮』经验"""
+        lesson = workflow._distill_lesson(
+            "让灯亮起来", "completed", 2,
+            [{"task": "查询"}, {"task": "执行"}],
+            [{"feedback": "第二步应先确认灯泡状态"}],
+        )
+        assert "让灯亮起来" in lesson and "2 轮" in lesson
+
+    def test_distill_partial_with_feedback(self):
+        """partial 且有评审反馈 -> 教训含修正建议"""
+        lesson = workflow._distill_lesson(
+            "开空调", "partial", 2,
+            [{"task": "查温度"}],
+            [{"feedback": "应加一步确认空调型号"}],
+        )
+        assert "应加一步确认空调型号" in lesson and "教训" in lesson
+
+    def test_distill_failed_single_round(self):
+        """failed 单轮 -> 建议换分解思路"""
+        lesson = workflow._distill_lesson("目标X", "failed", 1, [{"task": "执行"}], [])
+        assert "换一种目标分解思路" in lesson
+
+    def test_distill_completed_single_round(self):
+        """completed 单轮 -> 正向可沿用经验"""
+        lesson = workflow._distill_lesson("目标Y", "completed", 1,
+                                          [{"task": "一步"}], [])
+        assert "一轮通过" in lesson and "沿用" in lesson
+
+    # ── 端到端：反思沉淀 + 回灌 ──────────────────────────────
+
+    def test_workflow_stores_lesson(self, tmp_path, monkeypatch):
+        """run_workflow 后应沉淀一条 workflow_lesson 记忆（scope 隔离）。"""
+        monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
+        self._reset_singletons()
+        res = self._run_faulty("让灯亮起来")
+        assert res.status == "completed"
+        sm = self._fresh_super_memory()
+        hits = sm.recall_related("让灯亮起来", scope="workflow_lesson", top_k=5)
+        assert any("让灯亮起来" in h.content for h in hits)
+
+    def test_recall_lessons_reworded_goal(self, tmp_path, monkeypatch):
+        """改写相关新目标应召回既往经验（语义通道闭合泛化）。"""
+        monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
+        self._reset_singletons()
+        self._run_faulty("让灯亮起来")  # 沉淀多轮 lesson
+        res = self._run_faulty("让灯亮起来")  # 再跑一次，沉淀第二条
+        # 改写相关目标召回既往经验
+        lessons = workflow._recall_lessons("把灯光调亮方便看书", top_k=3)
+        assert any("让灯亮起来" in l for l in lessons)
+        # 无关目标不召回
+        unrelated = workflow._recall_lessons("今天天气怎么样", top_k=3)
+        assert all("让灯亮起来" not in l for l in unrelated)
+
+    def test_reflection_degrades_without_super_memory(self, monkeypatch):
+        """无超长期记忆时反思优雅降级（不抛异常）。"""
+        import src.core.memory_longterm as mlt
+        monkeypatch.setattr(mlt, "get_super_memory", lambda: None)
+        assert workflow._recall_lessons("目标") == []
+        # run_workflow 全程不因反思失败而抛
+        res = run_workflow(
+            "目标", planner=lambda g: self.FAKE_PLAN,
+            executor=lambda t, goal="": {"action": "nod", "answer": "ok",
+                                          "trace": [], "session_id": "s"},
+            reviewer=lambda g, s: {"accept": True, "feedback": ""},
+        )
+        assert res.status == "completed"

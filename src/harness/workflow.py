@@ -180,8 +180,16 @@ def _default_planner(goal: str) -> str:
   """默认规划器：LLM 生成 JSON 计划。失败时抛异常，由 run_workflow 降级。"""
   from src.core._utils import make_llm_client, get_model, thinking_extra
   client = make_llm_client(timeout=30.0)
+  # 注入既往相关经验（跨会话工作流自我改进）：复用语义召回通道
+  prior = _recall_lessons(goal, top_k=3)
+  prior_section = ""
+  if prior:
+    prior_section = (
+      "\n\n[既往相关经验，请参考：同类目标上次的成功/失败教训，规划时规避其失败点、"
+      f"沿用其成功点]\n" + "\n".join(f"- {l}" for l in prior)
+    )
   prompt = (
-    f"目标：{goal}\n\n"
+    f"目标：{goal}\n\n{prior_section}\n\n"
     f"请把这个目标分解为 2-4 个可独立执行的步骤。宁少勿多：简单目标 1-2 步即可，"
     f"只有真正需要分工时才增加步骤。最多 4 步。只输出 JSON，格式：\n"
     f'{{"rationale": "为何这样分解", '
@@ -360,6 +368,86 @@ def _remember_workflow(goal: str, status: str, iterations: int,
         logger.warning("[Workflow] 工作流记忆沉淀失败（降级）: %s", e)
 
 
+def _distill_lesson(goal: str, status: str, iterations: int,
+                    steps: list, review_log: list) -> str:
+    """
+    把一次工作流执行蒸馏成一条可复用经验（确定性、离线、无 LLM）。
+
+    规则：
+    - completed 且多轮（迭代>1，说明发生过重规划）-> 记录"需 {iterations} 轮 + 步骤数"，
+      提示同类目标不宜一次分解过粗
+    - partial / failed 且有多轮 -> 提取评审反馈（review_log 里的 feedback）作为修正建议
+    - failed 且单轮 -> 记录"首轮即失败"，提示换分解思路
+    返回以『目标』结尾的可读字符串，便于后续按 goal 锚点语义召回。
+    """
+    goal_s = (goal or "").strip() or "未命名目标"
+    n_steps = len([s for s in steps if s.get("task")])
+    reviews = [str(r.get("feedback", "") or "").strip() for r in (review_log or [])
+               if str(r.get("feedback", "") or "").strip()]
+    first_review = reviews[0] if reviews else ""
+
+    if status == "completed" and iterations > 1:
+        return (f"经验『{goal_s}』：同类目标建议一次分解成更多步骤；"
+                f"本轮 {n_steps} 步经 {iterations} 轮评审才通过（首轮被要求完善）。")
+    if status in ("partial", "failed") and first_review:
+        return (f"教训『{goal_s}』：评审建议修正——{first_review[:120]}；"
+                f"同类目标规划时应先纳入该点。")
+    if status == "failed":
+        return (f"教训『{goal_s}』：本轮 {iterations} 轮均未产生完成步骤，"
+                f"建议换一种目标分解思路或降低目标粒度。")
+    # completed 单轮通过：无需要修正，记一条正向经验（提示可沿用该分解）
+    return (f"经验『{goal_s}』：{n_steps} 步分解一轮通过，可沿用为本类目标的默认拆法。")
+
+
+def _remember_workflow_lesson(goal: str, status: str, iterations: int,
+                              steps: list, review_log: list,
+                              session_id: str) -> None:
+    """
+    把工作流反思沉淀进超长期记忆（scope='workflow_lesson'）——跨会话自我改进素材。
+
+    与 'workflow' 先例分 scope：先例记录『发生了什么』，lesson 记录『下次怎么做』。
+    存 metadata.goal 供 recall_related 语义召回；失败降级不抛出（窄腰原则）。
+    """
+    try:
+        content = _distill_lesson(goal, status, iterations, steps, review_log)
+        from src.core.memory_longterm import get_super_memory
+        sm = get_super_memory()
+        if sm is None:
+            return
+        importance = 0.85 if status in ("partial", "failed") else 0.6
+        sm.remember(
+            content=content, memory_type="procedural", scope="workflow_lesson",
+            importance=importance,
+            metadata={"type": "workflow_lesson", "goal": (goal or "").strip(),
+                      "status": status, "iterations": iterations,
+                      "session_id": session_id},
+        )
+        logger.info("[Workflow] 已沉淀反思经验（status=%s）", status)
+    except Exception as e:
+        logger.warning("[Workflow] 反思沉淀失败（降级）: %s", e)
+
+
+def _recall_lessons(goal: str, top_k: int = 3) -> list:
+    """
+    召回与目标相关的既往工作流经验，作为新一轮规划的引导上下文。
+
+    复用 recall_related 语义通道（对 goal 锚点匹配，改写相关目标也能命中）。
+    super_mem 缺失 / 无命中时返回 []（不抛异常）。
+    """
+    if not goal or not goal.strip():
+        return []
+    try:
+        from src.core.memory_longterm import get_super_memory
+        sm = get_super_memory()
+        if sm is None:
+            return []
+        hits = sm.recall_related(goal, scope="workflow_lesson", top_k=top_k)
+        return [str(h.content)[:160] for h in hits]
+    except Exception as e:
+        logger.debug("[Workflow] 既往经验召回失败（忽略）: %s", e)
+        return []
+
+
 def run_workflow(goal: str, planner=None, executor=None, reviewer=None,
                  max_iterations: int = 3, verbose: bool = False) -> WorkflowResult:
   """
@@ -496,6 +584,13 @@ def run_workflow(goal: str, planner=None, executor=None, reviewer=None,
     _remember_workflow(goal, status, iterations, step_dicts, session_id)
   except Exception as e:
     logger.warning("[Workflow] 记忆沉淀调用失败（降级）: %s", e)
+
+  # ---- 工作流反思（跨会话自我改进）：蒸馏经验入超长期记忆 ----
+  try:
+    _remember_workflow_lesson(goal, status, iterations, step_dicts,
+                              review_log, session_id)
+  except Exception as e:
+    logger.warning("[Workflow] 反思沉淀调用失败（降级）: %s", e)
 
   # ---- 统计 ----
   _stats["runs"] += 1
