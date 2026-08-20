@@ -319,6 +319,78 @@ class SuperMemory:
             d["metadata"] = {}
         return d
 
+    # ── 语义相关召回（泛化通道，capstone 推荐方向 #2） ──────
+    #
+    # 词法召回（FTS/LIKE/bigram）对近逐字目标精确，但对改写相关目标返回空
+    # （复古如『让灯亮起来』vs『把灯光调亮方便看书』）。本通道对比的是
+    # "短而密"的语义锚点 —— metadata.goal（缺省取内容首行的工作流标题），
+    # 而非整段冗长内容（后者会被长内容稀释成 Dice≈0.04，见 capstone 教训）。
+    # 双守卫卡精度：min_shared 结构上要求 >=2 个共享字（语义接地），
+    # 再叠加 min_overlap 复合分阈值 —— 两个正交门槛，比单一阈值抗漂移。
+    # 仅作为词法命中的回退，不污染高频精确路径。
+
+    def recall_related(self, query: str, scope: str = "default", top_k: int = 5,
+                       min_shared: int = 2, min_overlap: float = 0.08) -> List[MemoryHit]:
+        """
+        语义相关召回：词法命中为空时的泛化通道（针对结构化 goal / 标题锚点）。
+
+        锚点选择：优先 metadata['goal']（工作流等结构化记忆），缺省回退到内容
+        首行『工作流『X』…』标题里的 X。对比锚点而不是完整内容，规避长内容稀释。
+        返回超过 min_shared 与 min_overlap 双门槛的候选，按综合分降序；失败/无法
+        取锚点时返回空（不抛异常）。
+        """
+        if not query or not scope:
+            return []
+        q = re.sub(r"\s+", "", query)
+        if not q:
+            return []
+        qu = set(q)
+        rows = self._conn.execute(
+            "SELECT * FROM memories WHERE scope=? ORDER BY last_accessed DESC LIMIT 300",
+            (scope,),
+        ).fetchall()
+        scored: List[tuple] = []
+        for row in rows:
+            anchor = self._goal_anchor(row)
+            if not anchor:
+                continue
+            au = set(re.sub(r"\s+", "", anchor))
+            shared = qu & au
+            if len(shared) < min_shared:      # 结构守卫：语义接地
+                continue
+            union = qu | au
+            jac = len(shared) / len(union) if union else 0.0
+            qrec = len(shared) / len(q)
+            # 综合分：Jaccard 为主（对称），查询召回为辅（鼓励短锚点高命中）
+            score = 0.6 * jac + 0.4 * qrec
+            if score < min_overlap:            # 软门槛：复合分
+                continue
+            scored.append((score, row))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        hits = [self._row_to_hit(row, score) for score, row in scored[:top_k]]
+        if hits:
+            self._stats["total_recalls"] += 1
+        return hits
+
+    def _goal_anchor(self, row) -> str:
+        """
+        从记忆行提取"短而密"的语义锚点：metadata['goal'] 优先；
+        缺省回退内容首行『工作流『X』…』标题里的 X。拿不到返回空串。
+        """
+        md = {}
+        try:
+            md = json.loads(row["metadata"]) if row["metadata"] else {}
+        except (json.JSONDecodeError, TypeError):
+            md = {}
+        goal = str(md.get("goal") or "").strip()
+        if goal:
+            return goal[:80]
+        content = str(row["content"] or "")
+        m = re.match(r"工作流『(.{1,80})』", content)
+        if m:
+            return m.group(1)
+        return ""
+
     # ── 图扩散召回 ──────────────────────────────────────────
 
     def recall_by_graph(self, seed_ids: List[str], top_k: int = 5,

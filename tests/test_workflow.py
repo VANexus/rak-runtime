@@ -377,24 +377,28 @@ class TestWorkflowSuperMemory:
         hits2 = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
         assert len(hits) == len(hits2), "同目标再跑应幂等（不新增重复条目）"
 
-    def test_related_goal_recall_generalization_gap(self, tmp_path, monkeypatch):
-        """相关目标召回泛化不足（已知限制）——锁定当前行为作为改进基线。
+    def test_related_goal_recall_generalization(self, tmp_path, monkeypatch):
+        """改写相关目标经语义通道召回（capstone 泛化缺口已闭合）。
 
-        诚实记录：SuperMemory 词法召回（FTS/LIKE/bigram）对『让灯亮起来』能命中
-        近逐字查询，但改写后的相关目标（把灯光调亮/调亮书房的灯/灯光）返回空——
-        跨会话先例只能按近逐字召回，无法引导相关新目标（与语义缓存早期同义改写
-        失效同类；语义缓存用 Dice 层解决，超长期记忆泛化待后续）。此测试锁定当前
-        行为，防止静默『看似支持实不支持』。
+        词法召回（recall）保持近逐字精确；新增语义相关通道（recall_related）
+        对结构化 goal/标题锚点做匹配，使改写目标『把灯光调亮方便看书』也能召回
+        先例『让灯亮起来』；无关目标仍精确返回空（精度契约不变）。
         """
         monkeypatch.setenv("RAK_DATA_DIR", str(tmp_path / "data"))
         self._reset_singletons()
         self._run()  # 写入「让灯亮起来」工作流记忆
         sm = self._fresh_super_memory()
-        # 近逐字查询：可召回
+        # 近逐字查询：词法召回可召回
         exact = sm.recall("工作流 让灯亮", scope="workflow", top_k=5)
         assert any("让灯亮起来" in h.content for h in exact)
-        # 改写相关目标：当前词法召回返回空（已知泛化缺口，见 docstring）
+        # 改写相关目标：词法召回仍返回空（精确路径不改）
         rewritten = sm.recall("把灯光调亮方便看书", scope="workflow", top_k=5)
         assert all("让灯亮起来" not in h.content for h in rewritten)
+        # 改写相关目标：语义相关通道现在可召回先例（泛化缺口已闭合）
+        related = sm.recall_related("把灯光调亮方便看书", scope="workflow", top_k=5)
+        assert any("让灯亮起来" in h.content for h in related)
+        # 无关目标：语义通道也精确返回空（精度契约保持）
+        unrelated = sm.recall_related("今天天气怎么样", scope="workflow", top_k=5)
+        assert all("让灯亮起来" not in h.content for h in unrelated)
 
 

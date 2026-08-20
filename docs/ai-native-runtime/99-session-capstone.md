@@ -25,23 +25,20 @@
 | 图→决策集成测试 | 锁定 MemoryGraph 注入决策上下文 | 图结构记忆到决策的真实贡献 |
 | SuperMemory RAK_DATA_DIR 隔离 | 默认路径经 _data_dir() 派生 | 修复基准/测试跨运行串数据 |
 
-## 诚实记录：跨会话先例召回泛化缺口（未解决，需正确设计）
-调试确认：SuperMemory 词法召回（FTS/LIKE/bigram）对近逐字目标可召回，但**改写相关目标
-返回空**（`让灯亮起来` vs `把灯光调亮`）。尝试 naive 字符重叠（Dice）泛化失败：
-- 冗长内容 + bigram/trigram → Dice ≈ 0.04（稀释严重）
-- 简洁目标 + unigram → 目标对 Dice ≈ 0.14，但需阈值降到 0.10 才命中
-- 阈值 0.10 破坏 unsatisfied `unrelated-query-returns-empty` 精度契约（全量回归）
+## 诚实记录 → 已闭合：跨会话先例召回泛化缺口
 
-**结论**：需更严谨方案，而非调阈值。推荐方向：
-1. **`recall_by_graph` 图扩散召回**——工作流记忆已建图索引（scope='workflow'），
-   相关目标经相似边扩散浮出先例，天然带路径与权重，比字符 Dice 更有语义。
-2. 或：工作流记忆存**结构化 goal 字段**（metadata），检索时对 goal 字段做
-   embedding/关键词匹配，而非对整段内容做 Dice。
-3. 或：复用 semantic_cache 的 Dice 层实现作为**独立召回通道**并配反义/类别守卫
-   （但需先解决"短查询 vs 长记忆内容"的尺度不匹配）。
+上一轮记录的缺口（改写相关目标无法引导跨会话先例）已按推荐方向 #2 闭合：
+- **新增 `SuperMemory.recall_related`**——对比"短而密"的语义锚点（`metadata.goal`，
+  缺省回退内容首行『工作流『X』』标题），而非整段冗长内容（后者被稀释成 Dice≈0.04）。
+- **双守卫卡精度**：`min_shared>=2` 结构门槛（语义接地）+ `min_overlap` 复合分门槛
+  （Jaccard 主 + 查询召回辅）——两个正交门槛，替代上一轮脆弱单阈值。
+- **接线**：`MemoryGraph.query` 词法种子为空时回退 `recall_related` 再走图扩散，
+  DecisionEngine 消费的正是 `MemoryGraph.query`，生产路径直接受益。
+- **实测**：`把灯光调亮方便看书`→召回先例『让灯亮起来』；`今天天气怎么样`→空（精度契约保持）。
 
-`tests/test_workflow.py::test_related_goal_recall_generalization_gap` 已如实锁定
-当前近逐字行为，防止误以为已支持。
+附带修复：外部 MCP stub（`/tmp/rak_stub_mcp.py`）曾缺失导致若干测试依赖机器态。
+新增仓库内规范副本 `tools_stubs/rak_stub_mcp.py`（提供 `hello`+`square`，满足全部
+三个消费者契约），测试/基准自包含、可复现。套件 302 → **309 passed / 1 skipped**。
 
 ## 经验教训
 - 一次性交付需谨慎：跨会话先例召回泛化这类"看似简单实则精确/召回难平衡"的改动，

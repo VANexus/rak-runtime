@@ -47,6 +47,9 @@
 4. **scope 隔离** — 多用户/多设备记忆不串（G11）
 5. **记忆间图链接** — 中文 n-gram Jaccard 相似度（bigram+trigram 并集）自动建边，
    `recall_by_graph()` 图扩散召回（G10）
+6. **语义相关召回（泛化通道）** — `recall_related()`：词法命中为空时，对比短而密的
+   语义锚点（`metadata.goal`/标题），`min_shared`+`min_overlap` 双守卫卡精度，
+   让改写相关目标召回先例，无关目标仍精确返回空
 
 **接线**（`decision_engine.py`）：
 - `_get_super_memory()` 惰性单例
@@ -63,6 +66,7 @@
 在 SuperMemory 之上加**图查询层**，不重复存储：
 - `index()` 把记忆注册为图节点（轻量实体抽取）
 - `query()` 多跳召回：seed = SuperMemory.recall → 沿邻接边扩散 hops 层 → 带路径返回
+  （词法 seed 为空时回退 `recall_related` 语义通道，改写相关目标也能入图扩散）
 - `paths()` / `shortest_path()` BFS 路径发现——"这两段记忆如何相连"
 - `link()` 边同时写入 SuperMemory.memory_links（持久化委托，单一事实源）
 
