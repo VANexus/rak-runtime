@@ -34,12 +34,14 @@ SUMMARY_TEMPLATE = """## Objective
 def build_compaction_prompt(memory_context: str, keep_tail: int = 300) -> str:
     """构造压缩提示词：让 LLM 从长上下文中提炼结构化摘要，尾部原文保留"""
     tail = memory_context[-keep_tail:] if len(memory_context) > keep_tail else ""
+    # py3.11 兼容：f-string 表达式内不能含反斜杠，嵌套 f-string 提到外层
+    tail_block = f"## 最近内容（原样保留）\n{tail}" if tail else ""
     return f"""压缩以下上下文为结构化摘要，保留关键事实、未决问题、用户偏好、设备状态。
 
 ## 上下文（可能很长）
 {memory_context[:8000]}
 
-{f"## 最近内容（原样保留）\n{tail}" if tail else ""}
+{tail_block}
 
 输出 JSON：
 {{

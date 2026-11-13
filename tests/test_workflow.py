@@ -308,8 +308,10 @@ class TestSubagentInheritsHarnessCapabilities:
     def test_build_tools_includes_external_when_configured(self, monkeypatch):
         """RAK_MCP_SERVERS 配置时，_build_tools 物化外部 MCP 工具（子 agent 可用）。"""
         import sys, json as _json
+        from pathlib import Path
+        stub = Path(__file__).resolve().parent.parent / "tools_stubs" / "rak_stub_mcp.py"
         monkeypatch.setenv("RAK_MCP_SERVERS", _json.dumps(
-            [{"name": "stub", "command": sys.executable, "args": ["-u", "/tmp/rak_stub_mcp.py"]}]))
+            [{"name": "stub", "command": sys.executable, "args": ["-u", str(stub)]}]))
         import src.tools.mcp_client as mc
         mc._client = None  # 重读 env
         from src.core import agent_loop

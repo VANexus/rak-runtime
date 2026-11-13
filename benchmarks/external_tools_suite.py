@@ -9,6 +9,7 @@
 import json
 import logging
 import sys
+from pathlib import Path
 
 from src.harness.benchmark import BenchmarkTask, TaskSuite
 
@@ -33,7 +34,8 @@ def external_tools_runner(text: str) -> dict:
     mc._client = None  # 重读 env（配置下面注入）
     cfg = [
         {"name": "stub", "command": sys.executable,
-         "args": ["-u", "/tmp/rak_stub_mcp.py"]},
+         "args": ["-u", str(Path(__file__).resolve().parent.parent
+                            / "tools_stubs" / "rak_stub_mcp.py")]},
     ]
     os.environ["RAK_MCP_SERVERS"] = json.dumps(cfg)
 

@@ -82,10 +82,13 @@ class TestExternalMCPTools:
     _PY = None
 
     def _server_cfg(self):
-        # 用当前 venv python 全路径 spawn stub（裸 "python" 不在 PATH）
+        # 用当前 venv python 全路径 spawn stub（裸 "python" 不在 PATH）；
+        # stub 路径取仓内 tools_stubs 绝对路径（原写死 /tmp 仅适用于 Linux）
         import sys
+        from pathlib import Path
+        stub = Path(__file__).resolve().parent.parent / "tools_stubs" / "rak_stub_mcp.py"
         return [{"name": "stub", "command": sys.executable,
-                 "args": ["-u", "/tmp/rak_stub_mcp.py"]}]
+                 "args": ["-u", str(stub)]}]
 
     def test_external_tools_materialize(self, monkeypatch):
         """配置 RAK_MCP_SERVERS 后，_build_tools 应含 mcp_stub_square（并真实调用 stub）。"""
