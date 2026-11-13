@@ -299,6 +299,51 @@ class PostgresMemoryBackend:
         finally:
             self._put_conn(conn)
 
+    def load_embeddings(self, limit: int = 2000) -> Dict[str, List[float]]:
+        """加载 id→向量映射（恢复后进程内仍可做余弦检索）"""
+        conn = self._get_conn()
+        if not conn:
+            return {}
+
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, embedding FROM memories
+                WHERE embedding IS NOT NULL
+                ORDER BY importance DESC, created_at DESC
+                LIMIT %s
+            """, (limit,))
+
+            result: Dict[str, List[float]] = {}
+            for memory_id, emb in cur.fetchall():
+                vec = self._parse_embedding(emb)
+                if vec:
+                    result[memory_id] = vec
+
+            cur.close()
+            logger.info("[PostgresBackend] 加载向量 %s 条", len(result))
+            return result
+
+        except Exception as e:
+            logger.warning("[PostgresBackend] 向量加载失败: %s", e)
+            return {}
+        finally:
+            self._put_conn(conn)
+
+    def _parse_embedding(self, emb) -> Optional[List[float]]:
+        """兼容两种存储形态：pgvector 字符串 '[0.1, ...]' 与 JSONB 列表"""
+        try:
+            if isinstance(emb, (list, tuple)):
+                return [float(x) for x in emb]
+            if isinstance(emb, str):
+                s = emb.strip().strip("[](){}")
+                if not s:
+                    return None
+                return [float(x) for x in s.split(",") if x.strip()]
+        except (TypeError, ValueError):
+            return None
+        return None
+
     def search_by_embedding(self, query_embedding: List[float],
                             top_k: int = 5, memory_types: Optional[List[str]] = None) -> List[Dict]:
         """向量检索"""

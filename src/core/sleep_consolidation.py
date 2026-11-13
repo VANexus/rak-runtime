@@ -301,55 +301,96 @@ class SleepConsolidation:
 
         return None
 
+    # 向量聚类每轮参与条数上限：400² ≈ 8 万次余弦，后台线程可承受；
+    # 按重要度降序取批次，被合并的条目下轮腾出名额，滚动覆盖全量
+    VECTOR_CLUSTER_BATCH = 400
+
     def _compress_memories(self) -> int:
         """
-        记忆压缩：合并相似记忆。
+        记忆压缩：合并相似记忆（P3 升级：向量贪心聚类 + 前缀兜底）。
 
         策略：
-        - 内容高度相似（> 0.9）的记忆合并
-        - 保留更重要/更新的那个
-        - 合并元数据
+        - 有向量：按重要度降序贪心两两比较，余弦 > 0.85 合并（每轮只取
+          重要度最高的前 VECTOR_CLUSTER_BATCH 条，成本有界，滚动覆盖全量）
+        - 无向量：回退原前缀 + 字符 Jaccard 策略
+        - 每组保留最重要的一条，合并元数据与访问痕迹
         """
         if not self.memory_engine:
             return 0
 
         compressed = 0
         items = list(self.memory_engine.long_term.items.values())
+        if len(items) <= 1:
+            return 0
 
-        # 简单策略：按内容前缀分组
-        prefix_groups = {}
-        for entry in items:
-            # 取内容前 20 字符作为分组 key
-            prefix = entry.content[:20]
-            if prefix not in prefix_groups:
-                prefix_groups[prefix] = []
-            prefix_groups[prefix].append(entry)
+        lt = self.memory_engine.long_term
 
-        for prefix, group in prefix_groups.items():
-            if len(group) <= 1:
+        # 有向量子集：重要度降序，取批次
+        embedded = sorted(
+            (e for e in items if e.embedding and len(e.embedding) >= 8),
+            key=lambda e: (e.importance, e.created_at), reverse=True,
+        )[: self.VECTOR_CLUSTER_BATCH]
+
+        merged_ids: set = set()
+        for i, keeper in enumerate(embedded):
+            if keeper.id in merged_ids:
                 continue
-
-            # 保留最重要的那个
-            group.sort(key=lambda e: e.importance, reverse=True)
-            keeper = group[0]
-
-            for duplicate in group[1:]:
-                # 如果内容非常相似，合并
-                if self._content_similarity(keeper.content, duplicate.content) > 0.8:
+            for duplicate in embedded[i + 1:]:
+                if duplicate.id in merged_ids:
+                    continue
+                if self._is_similar(keeper, duplicate):
                     # 合并元数据
                     for k, v in duplicate.metadata.items():
                         if k not in keeper.metadata:
                             keeper.metadata[k] = v
+                    # 合并访问痕迹（保留较大者）
+                    keeper.access_count = max(keeper.access_count, duplicate.access_count)
+                    lt.items.pop(duplicate.id, None)
+                    merged_ids.add(duplicate.id)
+                    compressed += 1
 
-                    # 移除重复
-                    if duplicate.id in self.memory_engine.long_term.items:
-                        del self.memory_engine.long_term.items[duplicate.id]
-                        compressed += 1
+        # 无向量：原前缀 + Jaccard 兜底（前缀分组已天然有界）
+        plain_groups: dict = {}
+        for entry in items:
+            if not (entry.embedding and len(entry.embedding) >= 8):
+                plain_groups.setdefault(entry.content[:20], []).append(entry)
+        for group in plain_groups.values():
+            if len(group) <= 1:
+                continue
+            group.sort(key=lambda e: e.importance, reverse=True)
+            keeper = group[0]
+            for duplicate in group[1:]:
+                if duplicate.id in lt.items and self._content_similarity(
+                        keeper.content, duplicate.content) > 0.8:
+                    for k, v in duplicate.metadata.items():
+                        if k not in keeper.metadata:
+                            keeper.metadata[k] = v
+                    keeper.access_count = max(keeper.access_count, duplicate.access_count)
+                    lt.items.pop(duplicate.id, None)
+                    compressed += 1
 
         if compressed > 0:
+            # 清理向量索引中的陈旧项（items 已删但 (id, 向量) 元组还挂着）
+            lt._embeddings = [(i, e) for (i, e) in lt._embeddings if i in lt.items]
             logger.info("[SleepConsolidation] 压缩 %s 条重复记忆", compressed)
 
         return compressed
+
+    def _is_similar(self, a, b) -> bool:
+        """相似判定：向量余弦 > 0.85；无向量（或维度不齐）时回退字符 Jaccard"""
+        if a.embedding and b.embedding and len(a.embedding) == len(b.embedding):
+            return self._cosine(a.embedding, b.embedding) > 0.85
+        return self._content_similarity(a.content, b.content) > 0.8
+
+    @staticmethod
+    def _cosine(a, b) -> float:
+        """余弦相似度"""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if not norm_a or not norm_b:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
     def _content_similarity(self, a: str, b: str) -> float:
         """简单的内容相似度（字符级 Jaccard）"""

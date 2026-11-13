@@ -202,11 +202,13 @@ def build_agent_system_prompt(system_prompt: str, available_actions: list) -> st
         logger.warning("[AgentLoop] CoreMemory 注入失败: %s", e)
         core_block = ""
     base = system_prompt or _BUILTIN_PERSONA
+    # py3.11 兼容：f-string 表达式内不能含反斜杠，\n 拼接提到表达式外
+    core_suffix = (core_block + "\n\n") if core_block else ""
     return (
         f"{base}\n\n"
         f"## 可用动作\n"
         f"{action_desc}\n\n"
-        f"{core_block and (core_block + '\n\n') or ''}"
+        f"{core_suffix}"
         f"## 你的工具（神经元）\n"
         f"{tool_lines}"
         f"{ext_block}\n\n"

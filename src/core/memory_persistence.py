@@ -502,7 +502,8 @@ class PrefChainPersistence:
 
     def load_embeddings(self) -> Dict[str, List[float]]:
         if self._pg:
-            return {}  # pg 行内已存向量；缺失时回忆走关键词兜底
+            # pg 行内向量 → 恢复后进程内仍可做余弦检索；个别缺失时回忆走关键词兜底
+            return self._pg.load_embeddings()
         return self._file.load_embeddings()
 
     def record_execution(self, action: str, success: bool,

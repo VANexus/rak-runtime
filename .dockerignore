@@ -1,0 +1,16 @@
+# 构建上下文瘦身
+.git
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+tests/
+tools_stubs/
+benchmarks/
+docs/
+.rak-docs/
+*.log
+.env
+.mcp.json

@@ -1,14 +1,15 @@
 """大脑 MCP 客户端（G6/G19）离线测试 — 连外部工具（in-process + stdio），零网络。"""
 
 import sys
+from pathlib import Path
 
 import pytest
 
 from src.tools.mcp_client import MCPToolClient, MCPExternalTool, get_mcp_client, _server_configs
 
 
-# 复用的 stub 服务器（本地 spawn）
-_STUB_PATH = "/tmp/rak_stub_mcp.py"
+# 复用的 stub 服务器（本地 spawn）；取仓内绝对路径（原写死 /tmp 仅适用 Linux）
+_STUB_PATH = str(Path(__file__).resolve().parent.parent / "tools_stubs" / "rak_stub_mcp.py")
 
 
 def _inprocess_stub():
