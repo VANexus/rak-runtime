@@ -194,7 +194,7 @@ class ProactiveEngine:
     # ── 需求预测 ──────────────────────────────────────────
 
     async def _predict_needs(self) -> list[PredictedNeed]:
-        """基于用户行为模式预测需求"""
+        """基于用户行为模式预测需求（多特征评分：时间规律 + 历史重复 + 高频设备）"""
         needs = []
         if not self._user_model:
             return needs
@@ -202,23 +202,70 @@ class ProactiveEngine:
         import datetime
         now = datetime.datetime.now()
         current_time = now.strftime("%H:%M")
+        current_bucket = f"{now.hour:02d}:{(now.minute // 15) * 15:02d}"
+        today = now.date()
 
-        # 检查时间规律
+        # 特征 1：时间规律（提前 5 分钟准备：本类 _time_diff_minutes(t1,t2)=t2-t1，
+        # 传 (current, routine) 得 routine-current>0，即规律时刻在前方 0-5 分钟内触发）
+        routine_match = {}  # device -> {"diff": 距规律时刻的分钟数, "time": 规律时间}
         for routine_time, actions in self._user_model.behavior.time_routines.items():
             diff = self._time_diff_minutes(current_time, routine_time)
-
-            # 提前 5 分钟准备
             if 0 < diff <= 5:
                 for action in actions:
-                    need = PredictedNeed(
-                        action=action,
-                        device=action,
-                        confidence=0.7,
-                        reasoning=f"用户通常在 {routine_time} 执行 {action}",
-                        trigger_time=time.time() + diff * 60,
-                    )
-                    needs.append(need)
-                    self._stats["needs_predicted"] += 1
+                    routine_match[action] = {"diff": diff, "time": routine_time}
+
+        # 特征 2：历史重复度 —— 往日同一 15 分钟桶内出现该设备的不同天数
+        device_days: dict[str, set] = {}
+        for ts, device in self._user_model.iter_device_history():
+            try:
+                dt = datetime.datetime.fromtimestamp(ts)
+            except (ValueError, OSError, OverflowError):
+                continue
+            if dt.date() >= today:  # 只统计往日，今天的不算模式
+                continue
+            bucket = f"{dt.hour:02d}:{(dt.minute // 15) * 15:02d}"
+            if bucket == current_bucket:
+                device_days.setdefault(device, set()).add(dt.date())
+
+        # 特征 3：高频设备（弱信号，单独不足以触发）
+        frequent_devices = getattr(self._user_model.behavior, "frequent_devices", {}) or {}
+
+        # 证据累加：基础 0.5，按支持特征加分，置信度从"拍板 0.7"变为有依据
+        candidates: dict[str, dict] = {}
+        for device, days in device_days.items():
+            if len(days) >= 2:  # 至少两个不同日子重复才算模式
+                candidates[device] = {
+                    "features": [f"往日 {len(days)} 个不同日子的此刻常操作"],
+                    "bonus": 0.15,
+                }
+        for device, count in frequent_devices.items():
+            if count < 10:
+                continue  # 弱信号不足以成为候选，避免给低频设备也发预测
+            entry = candidates.setdefault(device, {"features": [], "bonus": 0.0})
+            entry["features"].append(f"高频设备（近期 {count} 次）")
+            entry["bonus"] += 0.1  # 本特征最多贡献 0.1（每设备只加一次）
+
+        # 纯时间规律（尚无历史/高频证据）也是合法候选，保持原有行为
+        for device in routine_match:
+            candidates.setdefault(device, {"features": [], "bonus": 0.0})
+
+        for device, info in candidates.items():
+            confidence = 0.5 + info["bonus"]
+            reasoning_parts = list(info["features"])
+            routine = routine_match.get(device)
+            trigger_time = time.time()
+            if routine:
+                confidence += 0.2
+                reasoning_parts.insert(0, f"用户通常在 {routine['time']} 执行")
+                trigger_time += routine["diff"] * 60
+            needs.append(PredictedNeed(
+                action=device,
+                device=device,
+                confidence=round(min(0.95, confidence), 2),
+                reasoning="；".join(reasoning_parts) or "高频行为模式",
+                trigger_time=trigger_time,
+            ))
+            self._stats["needs_predicted"] += 1
 
         return needs
 
