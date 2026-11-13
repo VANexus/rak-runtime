@@ -10,11 +10,12 @@
 设计原则：
 - 每次交互都在更新模型，不是静态配置
 - 画像用于优化响应，不是用于"讨好"用户
-- 数据只存本地 JSON，不上传
+- 默认只存本地 JSON；配置 RAG_POSTGRES_DSN 后同步到 PostgreSQL（多设备共享，可选）
 """
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -82,7 +83,9 @@ class BehaviorPattern:
 class UserModel:
     """持续学习的用户模型"""
 
-    def __init__(self, persist_path: Optional[str] = None):
+    def __init__(self, persist_path: Optional[str] = None,
+                 user_id: Optional[str] = None,
+                 pg_backend: Optional[object] = None):
         self.profile = UserProfile(
             first_seen=time.time(),
             last_seen=time.time()
@@ -92,10 +95,22 @@ class UserModel:
         self._corrections: list[InteractionRecord] = []  # 纠正记录（永不淘汰）
         self._persist_path = Path(persist_path) if persist_path else None
         self._max_history = 500  # 只保留最近 500 条
+        self._user_id = user_id or os.getenv("RAK_USER_ID", "default")
 
-        # 加载已有数据
-        if self._persist_path and self._persist_path.exists():
-            self._load()
+        # PG 后端（可选）：默认从 RAG_POSTGRES_DSN 懒建；测试可注入 pg_backend
+        self._pg = pg_backend
+        if self._pg is None:
+            dsn = os.getenv("RAG_POSTGRES_DSN")
+            if dsn:
+                try:
+                    from src.core.user_model_pg import UserModelPostgresBackend
+                    self._pg = UserModelPostgresBackend(dsn, self._user_id)
+                except Exception as e:
+                    logger.warning("用户模型 PG 后端初始化失败（降级本地 JSON）: %s", e)
+                    self._pg = None
+
+        # 加载已有数据（PG 与本地 JSON 同时存在时按 last_seen 取较新者）
+        self._load()
 
     # ── 主要接口 ──────────────────────────────────────────
 
@@ -156,6 +171,8 @@ class UserModel:
         # 只保留最近 50 条纠正
         if len(self._corrections) > 50:
             self._corrections = self._corrections[-50:]
+        # record_interaction 先于本条 append 已落盘一次（当时纠正列表还是空的），这里补存
+        self._save()
         logger.info("用户纠正: '%s' → 错误=%s, 正确=%s",
                      original_query, wrong_action, correct_action)
 
@@ -249,6 +266,17 @@ class UserModel:
             lines.append(f"用户最近操作的设备：{self.behavior.last_device}。")
 
         return "\n".join(lines) if lines else "用户画像数据不足，暂无特殊偏好。"
+
+    def iter_device_history(self) -> list:
+        """导出历史交互的 (时间戳, 设备类型) 列表（供主动需求预测等模块分析）"""
+        out = []
+        for r in self._history:
+            if not r.timestamp or not r.action_taken:
+                continue
+            device = self._extract_device(r.action_taken)
+            if device:
+                out.append((r.timestamp, device))
+        return out
 
     def get_correction_context(self, query: str) -> Optional[str]:
         """检查是否有类似查询的纠正历史，用于避免重复犯错"""
@@ -395,6 +423,7 @@ class UserModel:
     def _save(self):
         try:
             data = {
+                "user_id": self._user_id,
                 "profile": {
                     "expertise_level": self.profile.expertise_level,
                     "communication_style": self.profile.communication_style,
@@ -414,24 +443,69 @@ class UserModel:
                     "last_query": self.behavior.last_query,
                 },
                 "history": [asdict(r) for r in self._history[-100:]],
+                # 纠正记录是学习信号最强的数据，随包持久化（原先只存内存，重启即丢）
+                "corrections": [asdict(r) for r in self._corrections[-50:]],
             }
-            atomic_write_json(self._persist_path, data)
+            # 本地 JSON 永远落一份（PG 不可用时是唯一真源）
+            if self._persist_path:
+                atomic_write_json(self._persist_path, data)
+            # PG 同步（可选，多设备共享；失败不影响本地）
+            if self._pg is not None and getattr(self._pg, "available", True):
+                try:
+                    self._pg.save(data, self.profile.last_seen)
+                except Exception as e:
+                    logger.warning("用户模型 PG 同步失败: %s", e)
         except Exception as e:
             logger.warning("用户模型持久化失败: %s", e)
 
     def _load(self):
-        """从 JSON 加载"""
+        """加载已有画像：PG 与本地 JSON 同时存在时按 last_seen 取较新者"""
+        pg_data = None
+        if self._pg is not None and getattr(self._pg, "available", True):
+            try:
+                pg_data = self._pg.load()
+            except Exception as e:
+                logger.warning("读取用户模型 PG 失败: %s", e)
+
+        json_data = None
+        if self._persist_path and self._persist_path.exists():
+            try:
+                with open(self._persist_path, "r", encoding="utf-8") as f:
+                    json_data = json.load(f)
+            except Exception as e:
+                logger.warning("加载用户模型 JSON 失败: %s", e)
+
+        if pg_data and json_data:
+            data = pg_data if self._last_seen_of(pg_data) >= self._last_seen_of(json_data) else json_data
+            source = "PG" if data is pg_data else "JSON"
+        elif pg_data:
+            data, source = pg_data, "PG"
+        elif json_data:
+            data, source = json_data, "JSON"
+        else:
+            return
+
         try:
-            with open(self._persist_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            if "profile" in data:
-                self.profile = UserProfile(**data["profile"])
-            if "behavior" in data:
-                self.behavior = BehaviorPattern(**data["behavior"])
-            if "history" in data:
-                self._history = [InteractionRecord(**r) for r in data["history"]]
-
-            logger.info("用户模型已加载: %d 条历史记录", len(self._history))
+            self._apply(data)
+            logger.info("用户模型已加载（来源=%s）: %d 条历史记录", source, len(self._history))
         except Exception as e:
-            logger.warning("加载用户模型失败: %s", e)
+            logger.warning("应用用户模型数据失败: %s", e)
+
+    @staticmethod
+    def _last_seen_of(data: dict) -> float:
+        """读取画像数据包内的 last_seen（多设备仲裁依据）"""
+        try:
+            return float(data.get("profile", {}).get("last_seen", 0))
+        except Exception:
+            return 0.0
+
+    def _apply(self, data: dict):
+        """把一个画像数据包应用到内存状态"""
+        if "profile" in data:
+            self.profile = UserProfile(**data["profile"])
+        if "behavior" in data:
+            self.behavior = BehaviorPattern(**data["behavior"])
+        if "history" in data:
+            self._history = [InteractionRecord(**r) for r in data["history"]]
+        if "corrections" in data:
+            self._corrections = [InteractionRecord(**r) for r in data["corrections"]]
