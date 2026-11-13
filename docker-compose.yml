@@ -1,0 +1,45 @@
+# rak-runtime 本地部署
+#   仅起运行时:      docker compose up -d
+#   连同依赖服务:    docker compose --profile deps up -d
+# 依赖服务（PG/Redis）不配也行——不设 DSN 时自动降级 SQLite/JSON（优雅降级原则）
+services:
+  runtime:
+    build: .
+    ports:
+      - "50051:50051"
+    environment:
+      - RAK_DATA_DIR=/app/data
+      # 可选：长期记忆 + 用户画像多设备同步走 PG（需 psycopg2，见 pyproject 注释）
+      # - RAG_POSTGRES_DSN=postgres://rak:rak@postgres:5432/rak_memory
+      # 可选：短期记忆走 Redis（需 redis 驱动）
+      # - REDIS_URL=redis://redis:6379/0
+      # 可选：多设备身份（同一 user_id 的画像在 PG 间共享）
+      # - RAK_USER_ID=default
+    volumes:
+      - runtime-data:/app/data
+    restart: unless-stopped
+
+  # ── 可选依赖（--profile deps 启用）──
+  postgres:
+    image: postgres:17
+    profiles: ["deps"]
+    environment:
+      POSTGRES_USER: rak
+      POSTGRES_PASSWORD: rak
+      POSTGRES_DB: rak_memory
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    profiles: ["deps"]
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  runtime-data:
+  pg-data:
+  redis-data:
