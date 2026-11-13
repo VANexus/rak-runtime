@@ -88,6 +88,16 @@ class MetaCognition:
         self._decision_history: list[DecisionRecord] = []
         self._max_history = 200
 
+        # 置信度校准（从实际成功率反调）：
+        # 按预测置信度分桶统计实际正确率，对后续预测做收缩校正；
+        # 等级阈值可被反思（reflect）动态收紧/放松
+        self._calibration: dict[str, dict] = {}   # bucket -> {n, correct, sum_predicted}
+        self._level_thresholds = {"high": 0.85, "medium": 0.6, "low": 0.3}
+        self._calibration_min_samples = 10        # 单桶生效所需最小样本
+        self._calibration_shrink_k = 20           # 收缩强度（样本越少越趋近原值）
+        self._calibration_ratio_min = 0.5         # 校正系数下限
+        self._calibration_ratio_max = 1.5         # 校正系数上限
+
         # 统计
         self._stats = {
             "total_decisions": 0,
@@ -200,12 +210,16 @@ class MetaCognition:
         score = weighted_sum * expertise_factor - correction_penalty
         score = max(0.0, min(1.0, score))
 
-        # 确定等级
-        if score > 0.85:
+        # 置信度校准：按历史实际正确率收缩校正（无足够历史时为恒等）
+        raw_score = score
+        score = self._calibrated_score(score)
+
+        # 确定等级（阈值可被反思反调）
+        if score > self._level_thresholds["high"]:
             level = ConfidenceLevel.HIGH
-        elif score > 0.6:
+        elif score > self._level_thresholds["medium"]:
             level = ConfidenceLevel.MEDIUM
-        elif score > 0.3:
+        elif score > self._level_thresholds["low"]:
             level = ConfidenceLevel.LOW
         else:
             level = ConfidenceLevel.UNCERTAIN
@@ -233,6 +247,8 @@ class MetaCognition:
             reasoning_parts.append("规则引擎匹配")
         if has_correction_history:
             reasoning_parts.append("⚠️ 有纠正历史（已降低置信度）")
+        if abs(score - raw_score) > 0.02:
+            reasoning_parts.append(f"校准 {raw_score:.2f}→{score:.2f}")
 
         reasoning = "置信度评估: " + "; ".join(reasoning_parts) if reasoning_parts else "无直接证据"
 
@@ -367,13 +383,53 @@ class MetaCognition:
             self._stats["strategy_usage"].get(strategy, 0) + 1
 
     def record_outcome(self, query: str, was_correct: bool, feedback: str = ""):
-        """记录决策结果（用于反思学习）"""
+        """记录决策结果（用于反思学习与置信度校准）"""
         # 找到最近的匹配记录
         for record in reversed(self._decision_history):
             if record.query == query and record.was_correct is None:
                 record.was_correct = was_correct
                 record.user_feedback = feedback
+                # 喂校准桶：预测置信度 vs 实际结果
+                stats = self._calibration.setdefault(
+                    self._bucket_of(record.confidence_score),
+                    {"n": 0, "correct": 0, "sum_predicted": 0.0},
+                )
+                stats["n"] += 1
+                stats["sum_predicted"] += record.confidence_score
+                if was_correct:
+                    stats["correct"] += 1
                 break
+
+    @staticmethod
+    def _bucket_of(score: float) -> str:
+        """预测置信度分桶（与等级段对齐）"""
+        if score > 0.85:
+            return "high"
+        if score > 0.6:
+            return "medium"
+        if score > 0.3:
+            return "low"
+        return "uncertain"
+
+    def _calibrated_score(self, score: float) -> float:
+        """按历史实际正确率校正预测置信度；样本不足时趋近原值"""
+        stats = self._calibration.get(self._bucket_of(score))
+        if not stats or stats["n"] < self._calibration_min_samples:
+            return score
+
+        success_rate = stats["correct"] / stats["n"]
+        mean_predicted = stats["sum_predicted"] / stats["n"]
+        if mean_predicted <= 0:
+            return score
+
+        # 校正系数 = 实际正确率 / 平均预测置信度，限幅防过度反应
+        ratio = success_rate / mean_predicted
+        ratio = max(self._calibration_ratio_min, min(self._calibration_ratio_max, ratio))
+
+        # 收缩：样本越少越靠近 1.0（不激进）
+        weight = stats["n"] / (stats["n"] + self._calibration_shrink_k)
+        adjusted = score * (1.0 + weight * (ratio - 1.0))
+        return max(0.01, min(0.99, adjusted))
 
     def reflect(self) -> dict:
         """
@@ -414,7 +470,7 @@ class MetaCognition:
                     self._strategy_weights[strategy] = min(1.5,
                         self._strategy_weights.get(strategy, 1.0) + 0.05)
 
-        # 置信度校准检查
+        # 置信度校准检查 + 反调阈值
         high_conf = [r for r in self._decision_history
                      if r.confidence_score > 0.85 and r.was_correct is not None]
         if high_conf:
@@ -424,6 +480,13 @@ class MetaCognition:
                     f"高置信度决策的实际准确率只有 {high_accuracy:.0%}，"
                     "置信度评估过于乐观，需要收紧阈值"
                 )
+            # 反调 high 阈值：准确率持续偏低则收紧（上限 0.95），表现优异则适度放松（下限 0.80）
+            if high_accuracy < 0.80 and self._level_thresholds["high"] < 0.95:
+                self._level_thresholds["high"] = round(self._level_thresholds["high"] + 0.02, 2)
+                insights.append(f"高置信阈值收紧至 {self._level_thresholds['high']}")
+            elif high_accuracy >= 0.95 and self._level_thresholds["high"] > 0.80:
+                self._level_thresholds["high"] = round(self._level_thresholds["high"] - 0.01, 2)
+                insights.append(f"高置信阈值放松至 {self._level_thresholds['high']}")
 
         result = {
             "status": "ok",
@@ -440,9 +503,17 @@ class MetaCognition:
 
     def get_stats(self) -> dict:
         """获取元认知统计"""
+        calibration_summary = {}
+        for bucket, stats in self._calibration.items():
+            calibration_summary[bucket] = {
+                "n": stats["n"],
+                "success_rate": round(stats["correct"] / stats["n"], 3) if stats["n"] else None,
+            }
         return {
             **self._stats,
             "strategy_weights": dict(self._strategy_weights),
+            "level_thresholds": dict(self._level_thresholds),
+            "calibration": calibration_summary,
             "history_size": len(self._decision_history),
         }
 

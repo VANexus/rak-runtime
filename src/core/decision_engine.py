@@ -35,6 +35,7 @@ _self_model = None
 _need_engine = None
 _memory_stream = None
 _emotion_engine = None
+_emotion_perception = None
 _living_graph = None
 _inner_loop = None
 _conversation_state = None
@@ -290,6 +291,24 @@ def _get_emotion_engine():
             logger.warning("情绪引擎初始化失败: %s", e)
             _emotion_engine = False
     return _emotion_engine if _emotion_engine is not False else None
+
+
+def _get_emotion_perception():
+    """情绪感知（P2-4）：文本语气 → 六维情绪，纯词典法零依赖、热路径不走 LLM"""
+    global _emotion_perception
+    if _emotion_perception is not None:
+        return _emotion_perception if _emotion_perception is not False else None
+    with _init_lock:
+        if _emotion_perception is not None:  # double-check
+            return _emotion_perception if _emotion_perception is not False else None
+        try:
+            from src.core.emotion_perception import EmotionPerception
+            _emotion_perception = EmotionPerception()
+            logger.info("情绪感知初始化成功")
+        except Exception as e:
+            logger.warning("情绪感知初始化失败: %s", e)
+            _emotion_perception = False
+    return _emotion_perception if _emotion_perception is not False else None
 
 
 def _get_living_graph():
@@ -982,6 +1001,11 @@ class DecisionEngine:
 
         if emotion:
             emotion.on_new_interaction()
+            # 文本语气情绪感知（P2-4）：从用户措辞推断情绪并融入六维状态，
+            # 在读取情绪描述前执行，使本次 prompt 能反映刚感知到的情绪
+            perception = _get_emotion_perception()
+            if perception:
+                perception.apply_to(emotion, query)
             emotion_state = emotion.state.to_dict()
             emotion_desc = emotion.state.describe()
             if emotion_desc:
@@ -1408,6 +1432,11 @@ class DecisionEngine:
         if loop:
             loop.on_correction(original_query, wrong_action, correct_action)
 
+        # 元认知校准：纠正 = 明确的决策错误信号（此前 record_outcome 从未被调用）
+        meta = _get_meta_cognition()
+        if meta:
+            meta.record_outcome(original_query, was_correct=False, feedback="correction")
+
         # CogRec: 从纠正中学习（最高优先级规则）
         cog_rec = _get_cog_rec()
         if cog_rec:
@@ -1461,6 +1490,13 @@ class DecisionEngine:
         user_model = _get_user_model()
         if user_model:
             user_model.record_interaction(query=query, action="", feedback=feedback)
+
+        # 元认知校准：显式反馈 = 决策对错信号（空反馈不参与校准）
+        if feedback in ("positive", "negative"):
+            meta = _get_meta_cognition()
+            if meta:
+                meta.record_outcome(query, was_correct=(feedback == "positive"),
+                                    feedback=feedback)
 
         # 内心循环（事件驱动）
         inner = _get_inner_loop()
