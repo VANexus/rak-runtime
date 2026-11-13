@@ -111,7 +111,8 @@ def _get_instance():
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic API Key | LLM 功能必需 |
 | `ANTHROPIC_BASE_URL` | API 代理地址 | 否（有默认值） |
 | `ANTHROPIC_MODEL` | 模型名 | 否（默认 mimo-v2.5-pro） |
-| `RAG_POSTGRES_DSN` | PostgreSQL 连接串 | 否（回退 SQLite） |
+| `RAG_POSTGRES_DSN` | PostgreSQL 连接串（长期记忆 pgvector + 用户画像多设备同步） | 否（回退 SQLite/JSON） |
+| `RAK_USER_ID` | 用户模型多设备身份（同一 user_id 的画像在 PG 间共享） | 否（默认 default） |
 | `MQTT_BROKER_HOST` | MQTT Broker 地址 | 否（默认 localhost） |
 | `MQTT_BROKER_PORT` | MQTT Broker 端口 | 否（默认 1883） |
 | `PERSONAPLEX_SERVER` | PersonaPlex WebSocket | 否（有默认值） |
